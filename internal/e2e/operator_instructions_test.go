@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,7 +27,8 @@ const (
 // repository and the repo_instructions block for this one, each attributed to
 // the configuration it came from.
 func TestOperatorOwnedInstructionsJourney(t *testing.T) {
-	h := NewHarness(t, SetupOpts{Agent: "claude"})
+	h := NewHarness(t, SetupOpts{Agent: "claude", NoRepoConfig: true})
+	assertNoRepositoryConfig(t, h)
 	if out, err := h.Run("init"); err != nil {
 		t.Fatalf("nm init: %v\n%s", err, out)
 	}
@@ -52,6 +54,7 @@ repo_instructions:
 
 	branch := "operator-owned-instructions"
 	h.CommitChange(branch, "internal/scm/github/github.go", "package github\n\n// changed\n", "touch scm")
+	assertNoRepositoryConfig(t, h)
 	h.PushToGate(branch)
 
 	run := h.WaitForRun(branch, 120*time.Second)
@@ -88,7 +91,40 @@ repo_instructions:
 		t.Errorf("document prompt is missing the attributed operator policy:\n%s", docPrompt)
 	}
 
+	assertNoRepositoryConfig(t, h)
 	t.Logf("review prompt tail:\n%s", promptTail(prompt))
+	t.Logf("document prompt carries operator policy: %s", operatorDocPolicy)
+}
+
+// assertNoRepositoryConfig checks positive tree reads, not a failed git show:
+// an unreadable ref is a fixture failure, never evidence of an absent config.
+// Check the authoritative default branch AND the branch being reviewed, since
+// deleting only the working copy would leave the daemon reading trusted config.
+func assertNoRepositoryConfig(t *testing.T, h *Harness) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for _, tree := range []struct {
+		name, dir, ref string
+	}{
+		{"trusted default branch", h.UpstreamDir, "refs/heads/main"},
+		{"reviewed branch", h.WorkDir, "HEAD"},
+	} {
+		out, err := h.runGit(ctx, tree.dir, "ls-tree", "-r", "--name-only", tree.ref, "--", ".no-mistakes.yaml")
+		if err != nil {
+			t.Fatalf("cannot inspect %s: %v\n%s", tree.name, err, out)
+		}
+		if strings.TrimSpace(string(out)) != "" {
+			t.Errorf("%s contains repository config: %s", tree.name, out)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(h.WorkDir, ".no-mistakes.yaml")); !os.IsNotExist(err) {
+		t.Errorf("working checkout must have no repository config; stat error = %v", err)
+	}
+	if t.Failed() {
+		t.FailNow()
+	}
+	t.Log("repository config absent in trusted default branch, reviewed branch and working checkout")
 }
 
 // appendGlobalConfig adds operator-owned settings to the harness's generated

@@ -70,6 +70,11 @@ type SetupOpts struct {
 	// to false to exercise the secure default.
 	AllowRepoCommands *bool
 
+	// NoRepoConfig omits .no-mistakes.yaml from the initial commit entirely.
+	// The default stays configured; tests of a genuinely unconfigured repository
+	// must opt in rather than merely omit their own guidance fields.
+	NoRepoConfig bool
+
 	// GlobalConfigExtra is appended verbatim to the generated global
 	// config.yaml. It exists for operator-only settings a test must exercise
 	// through the real loader - agent_timeout and review_agent_timeout, whose
@@ -170,7 +175,7 @@ func NewHarness(t *testing.T, opts SetupOpts) *Harness {
 	t.Setenv("NO_MISTAKES_NO_UPDATE_CHECK", "1")
 
 	h.writeGlobalConfig()
-	h.initGitRepos()
+	h.initGitRepos(opts.NoRepoConfig)
 
 	// Temporary-daemon ownership: inventory + concurrency slot. The suite
 	// wrapper (scripts/e2e.sh) and TestMain reaper recover if Cleanup never
@@ -232,7 +237,7 @@ auto_fix:
 // initGitRepos creates a bare upstream repo and a working clone with one
 // initial commit on the default branch. Both repos use a local git
 // identity so commits succeed without reading the user's gitconfig.
-func (h *Harness) initGitRepos() {
+func (h *Harness) initGitRepos(noRepoConfig bool) {
 	h.t.Helper()
 	ctx := context.Background()
 	mustGit := func(dir string, args ...string) {
@@ -261,21 +266,24 @@ func (h *Harness) initGitRepos() {
 	if err := os.WriteFile(readme, []byte("# e2e\n"), 0o644); err != nil {
 		h.t.Fatalf("write readme: %v", err)
 	}
-	// allow_repo_commands is committed to the trusted default-branch copy of
-	// .no-mistakes.yaml (never global, never the pushed branch). The harness
-	// models a trusted single-developer environment where the same user owns
-	// every branch, so it defaults to true: feature-branch commands run as
-	// before. Security tests override via SetupOpts.AllowRepoCommands = false.
-	allowRepoCommands := true
-	if h.allowRepoCommands != nil {
-		allowRepoCommands = *h.allowRepoCommands
+	mustGit(h.WorkDir, "add", "README.md")
+	if !noRepoConfig {
+		// allow_repo_commands is committed to the trusted default-branch copy of
+		// .no-mistakes.yaml (never global, never the pushed branch). The harness
+		// models a trusted single-developer environment where the same user owns
+		// every branch, so it defaults to true: feature-branch commands run as
+		// before. Security tests override via SetupOpts.AllowRepoCommands = false.
+		allowRepoCommands := true
+		if h.allowRepoCommands != nil {
+			allowRepoCommands = *h.allowRepoCommands
+		}
+		repoConfig := filepath.Join(h.WorkDir, ".no-mistakes.yaml")
+		repoCfg := fmt.Sprintf("ignore_patterns:\n  - '*.generated.go'\n  - 'vendor/**'\nallow_repo_commands: %t\n", allowRepoCommands)
+		if err := os.WriteFile(repoConfig, []byte(repoCfg), 0o644); err != nil {
+			h.t.Fatalf("write repo config: %v", err)
+		}
+		mustGit(h.WorkDir, "add", ".no-mistakes.yaml")
 	}
-	repoConfig := filepath.Join(h.WorkDir, ".no-mistakes.yaml")
-	repoCfg := fmt.Sprintf("ignore_patterns:\n  - '*.generated.go'\n  - 'vendor/**'\nallow_repo_commands: %t\n", allowRepoCommands)
-	if err := os.WriteFile(repoConfig, []byte(repoCfg), 0o644); err != nil {
-		h.t.Fatalf("write repo config: %v", err)
-	}
-	mustGit(h.WorkDir, "add", "README.md", ".no-mistakes.yaml")
 	mustGit(h.WorkDir, "commit", "-m", "initial commit")
 	mustGit(h.WorkDir, "remote", "add", "origin", h.UpstreamDir)
 	mustGit(h.WorkDir, "push", "-u", "origin", "main")
