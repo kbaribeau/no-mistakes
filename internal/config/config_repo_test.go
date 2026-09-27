@@ -572,6 +572,7 @@ func TestReviewPathInstructionsBytes_CountsTheWholeSection(t *testing.T) {
 	one := []PathInstruction{{Path: "a/**", Instructions: "check it"}}
 	wantOne := len("\n\n") + len(ReviewPathInstructionsHeading) + len("\n") +
 		len(ReviewPathInstructionsPathLabel) + len("a/**") + len("\n") +
+		len(ReviewPathInstructionsSourceLabel) + ReviewPathInstructionsMaxSourceBytes + len("\n") +
 		len(ReviewPathInstructionsFilesLabel) + ReviewPathInstructionsMaxFilesBytes + len("\n") +
 		len(ReviewPathInstructionsRulesLabel) + len("\n") +
 		len("check it")
@@ -582,6 +583,7 @@ func TestReviewPathInstructionsBytes_CountsTheWholeSection(t *testing.T) {
 	two := append(append([]PathInstruction{}, one...), PathInstruction{Path: "b/**", Instructions: "check it too"})
 	wantTwo := wantOne + len("\n\n") +
 		len(ReviewPathInstructionsPathLabel) + len("b/**") + len("\n") +
+		len(ReviewPathInstructionsSourceLabel) + ReviewPathInstructionsMaxSourceBytes + len("\n") +
 		len(ReviewPathInstructionsFilesLabel) + ReviewPathInstructionsMaxFilesBytes + len("\n") +
 		len(ReviewPathInstructionsRulesLabel) + len("\n") +
 		len("check it too")

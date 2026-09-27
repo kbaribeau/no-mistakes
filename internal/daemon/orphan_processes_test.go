@@ -103,7 +103,7 @@ func TestProtectedPathRefusalRetainsWorktreeButReapsProcessesAndEvidence(t *test
 			if err != nil {
 				t.Fatal(err)
 			}
-			recoverOnStartup(database, p, mgr, layout)
+			recoverOnStartup(database, p, mgr, layout, config.DefaultGlobalConfig())
 			run, err = database.GetRun(run.ID)
 			if err != nil || run.Status != types.RunFailed || len(mgr.executors) != 0 {
 				t.Fatalf("trusted-config recovery did not fail closed: run=%+v err=%v", run, err)

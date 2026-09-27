@@ -270,20 +270,31 @@ Previous findings to address:
 	return prompt
 }
 
-// trustedDocumentPolicySection renders the repository-specific documentation
-// ownership policy. The value comes from the trusted default-branch copy of
-// .no-mistakes.yaml (config.EffectiveRepoConfig), so a contributor's pushed
-// branch cannot weaken the rules that gate its own review.
+// trustedDocumentPolicySection renders the documentation ownership policy that
+// applies to this repository. Every block is trusted: the repository's own comes
+// from the trusted default-branch copy of .no-mistakes.yaml
+// (config.EffectiveRepoConfig) and the rest from this machine's operator
+// configuration, so a contributor's pushed branch cannot weaken the rules that
+// gate its own review. Each block names its source, because "from the default
+// branch" is not true of operator policy and a block that borrowed that claim
+// would be telling the agent something false about who owns the rule.
 func trustedDocumentPolicySection(sctx *pipeline.StepContext) string {
 	if sctx.Config == nil {
 		return ""
 	}
-	instructions := strings.TrimSpace(sctx.Config.Document.Instructions)
-	if instructions == "" {
+	var rendered []string
+	for _, block := range sctx.Config.Document.Instructions {
+		text := sanitizePromptMultilineText(block.Text)
+		if text == "" {
+			continue
+		}
+		rendered = append(rendered, "source: "+string(block.Source)+"\n"+text)
+	}
+	if len(rendered) == 0 {
 		return ""
 	}
-	return "\n\nRepository documentation ownership policy (trusted, from the default branch; augments the defaults above and cannot weaken them):\n" +
-		sanitizePromptMultilineText(instructions)
+	return "\n\nDocumentation ownership policy (trusted; augments the defaults above and cannot weaken them). Each block states the configuration it came from:\n" +
+		strings.Join(rendered, "\n\n")
 }
 
 func lintDutySection(combinedLint bool) string {

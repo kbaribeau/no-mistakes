@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -164,14 +165,45 @@ type GlobalConfig struct {
 	// directory-scoped toolchain configuration (mise, direnv), which resolves
 	// by path ancestry and therefore never reaches a worktree under NM_HOME.
 	// Placement is resolved for every consumer in internal/worktrees.
-	WorktreeRoots           map[string]string `yaml:"worktree_roots"`
-	CITimeout               time.Duration     `yaml:"-"`
-	StepQuietWarning        time.Duration     `yaml:"-"`
-	AgentTimeout            time.Duration     `yaml:"-"`
-	ReviewAgentTimeout      time.Duration     `yaml:"-"`
-	TestAgentTimeout        time.Duration     `yaml:"-"`
-	DaemonConnectTimeout    time.Duration     `yaml:"-"`
-	BranchSyncRemoteTimeout time.Duration     `yaml:"-"`
+	WorktreeRoots map[string]string `yaml:"worktree_roots"`
+	// Review and Document carry the operator's own review and documentation
+	// guidance for EVERY gated repository. They exist because the repository
+	// copy of these fields requires write access to the repository under
+	// validation, which an operator gating their own branches in someone
+	// else's repository does not have (see RepoInstructions for the
+	// per-repository half).
+	//
+	// SECURITY: this is an operator surface at the same trust level as
+	// review_agents and agent_config - ~/.no-mistakes/config.yaml is the
+	// operator's own machine, which no contributor can reach. It does not
+	// touch the trusted-default-branch boundary those fields have in a
+	// repository config: the pushed branch gains no new influence over the
+	// reviewer that gates it. The surface is deliberately limited to these
+	// two fields, which can only ADD requirements to a pass. commands, agent,
+	// no_ci, allow_repo_commands, and pr.base_branch are NOT available here
+	// and must not be added: durable out-of-tree configuration that can weaken
+	// a pass is precisely what the trusted-default-branch rule exists to
+	// prevent.
+	Review   OperatorReviewRaw `yaml:"review"`
+	Document DocumentRaw       `yaml:"document"`
+	// RepoInstructions scopes the same two fields to ONE repository. Keys are
+	// registered checkout paths (Repo.WorkingPath), matched exactly the way
+	// WorktreeRoots keys are, because they answer the same question: which
+	// registered repository does this operator-owned entry describe.
+	//
+	// The per-repository half is not a convenience over the global one. Rules
+	// divide into ones true for every repository and ones true for exactly
+	// one, and applying a repository's domain rules while reviewing a sibling
+	// application is worse than applying none: a confidently wrong finding
+	// costs more attention than a missing one.
+	RepoInstructions        map[string]RepoInstructions `yaml:"repo_instructions"`
+	CITimeout               time.Duration               `yaml:"-"`
+	StepQuietWarning        time.Duration               `yaml:"-"`
+	AgentTimeout            time.Duration               `yaml:"-"`
+	ReviewAgentTimeout      time.Duration               `yaml:"-"`
+	TestAgentTimeout        time.Duration               `yaml:"-"`
+	DaemonConnectTimeout    time.Duration               `yaml:"-"`
+	BranchSyncRemoteTimeout time.Duration               `yaml:"-"`
 	// GateReconcileInterval / GateReconcileTimeout bound how often and how
 	// long a parked approval gate is rechecked. They are machine-local
 	// operator knobs (slow hosts, contended gh auth) and global-only so a
@@ -211,34 +243,37 @@ type GlobalConfig struct {
 
 // globalConfigRaw is the on-disk YAML representation with duration as string.
 type globalConfigRaw struct {
-	Agent                   agentList                  `yaml:"agent"`
-	ACPXPath                string                     `yaml:"acpx_path"`
-	ForgejoAXIPath          string                     `yaml:"forgejo_axi_path"`
-	ACPRegistryOverrides    map[string]string          `yaml:"acp_registry_overrides"`
-	AgentPathOverride       map[string]string          `yaml:"agent_path_override"`
-	AgentArgsOverride       map[string][]string        `yaml:"agent_args_override"`
-	AgentConfig             map[string]agentProfileRaw `yaml:"agent_config"`
-	ReviewAgents            map[string]ReviewAgent     `yaml:"review_agents"`
-	WorktreeRoots           map[string]string          `yaml:"worktree_roots"`
-	CITimeout               string                     `yaml:"ci_timeout"`
-	DaemonConnectTimeout    string                     `yaml:"daemon_connect_timeout"`
-	BranchSyncRemoteTimeout string                     `yaml:"branch_sync_remote_timeout"`
-	GateReconcileInterval   string                     `yaml:"gate_reconcile_interval"`
-	GateReconcileTimeout    string                     `yaml:"gate_reconcile_timeout"`
-	BabysitTimeout          string                     `yaml:"babysit_timeout"`
-	StepQuietWarning        string                     `yaml:"step_quiet_warning"`
-	AgentTimeout            string                     `yaml:"agent_timeout"`
-	ReviewAgentTimeout      string                     `yaml:"review_agent_timeout"`
-	TestAgentTimeout        string                     `yaml:"test_agent_timeout"`
-	LogLevel                string                     `yaml:"log_level"`
-	SessionReuse            *bool                      `yaml:"session_reuse"`
-	AutoFix                 AutoFixRaw                 `yaml:"auto_fix"`
-	CI                      CIRaw                      `yaml:"ci"`
-	Rebase                  RebaseRaw                  `yaml:"rebase"`
-	Commit                  GlobalCommitRaw            `yaml:"commit"`
-	Intent                  GlobalIntentRaw            `yaml:"intent"`
-	Test                    TestRaw                    `yaml:"test"`
-	Eval                    EvalRaw                    `yaml:"eval"`
+	Agent                   agentList                   `yaml:"agent"`
+	ACPXPath                string                      `yaml:"acpx_path"`
+	ForgejoAXIPath          string                      `yaml:"forgejo_axi_path"`
+	ACPRegistryOverrides    map[string]string           `yaml:"acp_registry_overrides"`
+	AgentPathOverride       map[string]string           `yaml:"agent_path_override"`
+	AgentArgsOverride       map[string][]string         `yaml:"agent_args_override"`
+	AgentConfig             map[string]agentProfileRaw  `yaml:"agent_config"`
+	ReviewAgents            map[string]ReviewAgent      `yaml:"review_agents"`
+	WorktreeRoots           map[string]string           `yaml:"worktree_roots"`
+	Review                  OperatorReviewRaw           `yaml:"review"`
+	Document                DocumentRaw                 `yaml:"document"`
+	RepoInstructions        map[string]RepoInstructions `yaml:"repo_instructions"`
+	CITimeout               string                      `yaml:"ci_timeout"`
+	DaemonConnectTimeout    string                      `yaml:"daemon_connect_timeout"`
+	BranchSyncRemoteTimeout string                      `yaml:"branch_sync_remote_timeout"`
+	GateReconcileInterval   string                      `yaml:"gate_reconcile_interval"`
+	GateReconcileTimeout    string                      `yaml:"gate_reconcile_timeout"`
+	BabysitTimeout          string                      `yaml:"babysit_timeout"`
+	StepQuietWarning        string                      `yaml:"step_quiet_warning"`
+	AgentTimeout            string                      `yaml:"agent_timeout"`
+	ReviewAgentTimeout      string                      `yaml:"review_agent_timeout"`
+	TestAgentTimeout        string                      `yaml:"test_agent_timeout"`
+	LogLevel                string                      `yaml:"log_level"`
+	SessionReuse            *bool                       `yaml:"session_reuse"`
+	AutoFix                 AutoFixRaw                  `yaml:"auto_fix"`
+	CI                      CIRaw                       `yaml:"ci"`
+	Rebase                  RebaseRaw                   `yaml:"rebase"`
+	Commit                  GlobalCommitRaw             `yaml:"commit"`
+	Intent                  GlobalIntentRaw             `yaml:"intent"`
+	Test                    TestRaw                     `yaml:"test"`
+	Eval                    EvalRaw                     `yaml:"eval"`
 	// Jev is the retired jev.review_assist pre-brief block. The feature was
 	// removed after the offline trial showed its candidate listing cannot
 	// reach the review findings it is meant to surface. The key stays in the
@@ -420,9 +455,82 @@ type PRRaw struct {
 // PathInstruction is one glob-scoped block of review guidance. Path follows the
 // same match rules as ignore_patterns: no slash matches by basename, a trailing
 // "/**" matches an entire subtree, and anything else is a full-path glob.
+//
+// Source is stamped by Merge from the configuration the entry was read from and
+// is never decodable from YAML: a repository that could name its own source
+// could present its rules as the operator's.
 type PathInstruction struct {
-	Path         string `yaml:"path"`
-	Instructions string `yaml:"instructions"`
+	Path         string            `yaml:"path"`
+	Instructions string            `yaml:"instructions"`
+	Source       InstructionSource `yaml:"-"`
+}
+
+// RepoInstructions is the operator's guidance for one registered repository.
+// Its two fields ARE the allowlist: the type cannot express commands, agent,
+// no_ci, allow_repo_commands, or pr.base_branch, so the boundary is structural
+// rather than a rule someone has to remember. UnmarshalYAML rejects any other
+// key rather than ignoring it, so an operator who writes one is told it has no
+// effect here instead of believing it took.
+type RepoInstructions struct {
+	Review   OperatorReviewRaw `yaml:"review"`
+	Document DocumentRaw       `yaml:"document"`
+}
+
+// OperatorReviewRaw deliberately excludes trusted-repository-only controls such
+// as review.conversation. Adding a repository setting must not widen this surface.
+type OperatorReviewRaw struct {
+	PathInstructions []PathInstruction `yaml:"path_instructions"`
+}
+
+func (r *RepoInstructions) UnmarshalYAML(value *yaml.Node) error {
+	type repoInstructionsRaw struct {
+		Review   OperatorReviewRaw `yaml:"review"`
+		Document DocumentRaw       `yaml:"document"`
+	}
+	var raw repoInstructionsRaw
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		switch key := value.Content[i].Value; key {
+		case "review", "document":
+		default:
+			return fmt.Errorf("repo_instructions supports review and document only, not %q; operator configuration may add review and documentation guidance to a repository, never change what a pass requires of it", key)
+		}
+	}
+	r.Review = raw.Review
+	r.Document = raw.Document
+	return nil
+}
+
+// InstructionSource names where one block of review or documentation guidance
+// came from. It is prompt vocabulary, not an identifier: the reviewer reads it
+// verbatim, and a block that travels without it would inherit the authority of
+// whichever source the section heading happened to name.
+type InstructionSource string
+
+const (
+	// InstructionSourceRepository is the repository's own .no-mistakes.yaml,
+	// read from the trusted default branch (see EffectiveRepoConfig).
+	InstructionSourceRepository InstructionSource = "this repository's default branch (trusted)"
+	// InstructionSourceOperatorGlobal is ~/.no-mistakes/config.yaml's own
+	// review/document block, which applies to every gated repository.
+	InstructionSourceOperatorGlobal InstructionSource = "operator configuration for every repository"
+	// InstructionSourceOperatorRepo is the repo_instructions entry for the
+	// repository under validation.
+	InstructionSourceOperatorRepo InstructionSource = "operator configuration for this repository"
+)
+
+// ReviewPathInstructionsMaxSourceBytes is the longest source label. Every entry
+// is charged this full allowance by ReviewPathInstructionsBytes, the way the
+// matched-file list is, so the accounting bounds any mix of sources.
+const ReviewPathInstructionsMaxSourceBytes = len(InstructionSourceOperatorGlobal)
+
+// DocumentInstruction is one block of documentation placement policy together
+// with the configuration it came from.
+type DocumentInstruction struct {
+	Source InstructionSource
+	Text   string
 }
 
 // Review-prompt block frame for review.path_instructions.
@@ -430,6 +538,7 @@ type PathInstruction struct {
 // The review step renders every matched entry as
 //
 //	path: <path>
+//	source: <source>
 //	matched files: <files>
 //	instructions:
 //	<instructions>
@@ -440,11 +549,20 @@ type PathInstruction struct {
 // not an estimate of it; internal/pipeline/steps builds its blocks from these
 // same constants and TestReviewPathInstructionsSectionStaysWithinAccountedBytes
 // is the drift check.
+//
+// The heading no longer claims the whole section comes from the default branch,
+// because operator configuration is a second trusted origin (see
+// GlobalConfig.Review). Provenance moved onto every block instead of into the
+// heading: blocks from different sources are adjacent, so a single heading would
+// have to describe them all at once, and a reviewer weighing a rule needs to
+// know which one it is - a repository's own maintainers wrote one, this
+// machine's operator wrote the other.
 const (
-	ReviewPathInstructionsHeading    = "Repository review instructions for the changed paths (trusted, from the default branch). Each block below applies only to the files listed under its path, and adds to the requirements above:"
-	ReviewPathInstructionsPathLabel  = "path: "
-	ReviewPathInstructionsFilesLabel = "matched files: "
-	ReviewPathInstructionsRulesLabel = "instructions:"
+	ReviewPathInstructionsHeading     = "Review instructions for the changed paths (trusted: each block comes from this repository's default branch or from this machine's operator configuration, never from the branch under review). Each block applies only to the files listed under its path, states the source it came from, and adds to the requirements above:"
+	ReviewPathInstructionsPathLabel   = "path: "
+	ReviewPathInstructionsSourceLabel = "source: "
+	ReviewPathInstructionsFilesLabel  = "matched files: "
+	ReviewPathInstructionsRulesLabel  = "instructions:"
 	// ReviewPathInstructionsMaxFilesBytes bounds the matched-file list a single
 	// block may print. A broad glob can match hundreds of files, so the review
 	// step truncates the list deterministically and states the remaining count;
@@ -468,7 +586,41 @@ const (
 	// path_instructions may produce, measured by ReviewPathInstructionsBytes.
 	// It leaves room for the entry cap to be reached with a rule of ordinary
 	// length, so neither cap makes the other unusable.
-	MaxReviewPathInstructionsBytes = 16384
+	//
+	// The 2048 above the original 16384 is the provenance framing operator
+	// sources made necessary: a source line on every one of the 32 entries
+	// plus the longer heading. It is granted rather than taken out of the
+	// repository's share so that no .no-mistakes.yaml that was valid before
+	// this feature is rejected by it.
+	MaxReviewPathInstructionsBytes = 18432
+	// MaxOperatorReviewPathInstructions and
+	// MaxOperatorReviewPathInstructionsBytes bound EACH of the two operator
+	// sources - the global review block and the repo_instructions entry that
+	// matches the repository - independently, at parse time, exactly as the
+	// repository's own budget is bounded when its file is parsed.
+	//
+	// This is the per-source budget rather than a combined check, because the
+	// combined set only exists in Merge, which has no error path and no honest
+	// place to report a failure from (it runs after both files have already
+	// been accepted). Splitting the budget still bounds the assembled section
+	// statically: at most three sources can apply to one run - the repository,
+	// the operator's global block, and at most one repo_instructions entry,
+	// since the keys are canonicalized and duplicates are rejected - so the
+	// worst-case section is MaxReviewPathInstructionsBytes plus twice
+	// MaxOperatorReviewPathInstructionsBytes, and the entry count is bounded
+	// the same way. The operator's own share is smaller than the repository's
+	// because operator guidance supplements a repository rubric rather than
+	// replacing it.
+	//
+	// TODO(#1019): the alternative the issue names is a combined cap enforced
+	// over all three sources at once, which requires Merge to gain an error
+	// path (or a validating resolver ahead of it) so an over-budget
+	// COMBINATION can be reported instead of each source passing alone. That
+	// is a larger change to the shape of config resolution than this feature
+	// needs, and the maintainer has not ruled on it; it is the thing to build
+	// if the split budget proves too coarse.
+	MaxOperatorReviewPathInstructions      = 16
+	MaxOperatorReviewPathInstructionsBytes = 8192
 )
 
 // ReviewPathInstructionsBytes returns the largest review-prompt section these
@@ -488,6 +640,9 @@ func ReviewPathInstructionsBytes(entries []PathInstruction) int {
 			total += len("\n\n")
 		}
 		total += len(ReviewPathInstructionsPathLabel) + len(strings.TrimSpace(entry.Path)) + len("\n")
+		// The longest label rather than this entry's own, so the bound holds
+		// for entries validated before Merge has stamped a source on them.
+		total += len(ReviewPathInstructionsSourceLabel) + ReviewPathInstructionsMaxSourceBytes + len("\n")
 		total += len(ReviewPathInstructionsFilesLabel) + ReviewPathInstructionsMaxFilesBytes + len("\n")
 		total += len(ReviewPathInstructionsRulesLabel) + len("\n")
 		total += len(strings.TrimSpace(entry.Instructions))
@@ -818,17 +973,19 @@ type PR struct {
 	TitleFormat string
 }
 
-// Document is the resolved document-step config. Instructions come from the
-// trusted default-branch repo config and augment the built-in placement
-// policy in the document prompt.
+// Document is the resolved document-step config. Instructions are the blocks
+// that augment the built-in placement policy in the document prompt, each
+// carrying the configuration it came from: the trusted default-branch repo
+// config and the operator's global and per-repository configuration. It is a
+// list rather than one string so the prompt can attribute each block instead of
+// presenting operator policy as the repository's own (see MergeForCheckout).
 type Document struct {
-	Instructions string
+	Instructions []DocumentInstruction
 }
 
-// Review is the resolved review-step config. Both fields come from the trusted
-// default-branch repo config: PathInstructions scope extra review guidance to
-// the changed paths each glob matches, and Conversation decides whether the
-// reviewer may ask questions while it works.
+// Review is the resolved review-step config. PathInstructions draw guidance
+// from the trusted default branch and operator configuration, stamped with its
+// source. Conversation remains trusted-repository-only.
 type Review struct {
 	// Conversation is true when the reviewer may ask the operator questions
 	// mid-pass. It gates the whole protocol: the prompt section, the
@@ -1077,11 +1234,13 @@ func copyAgents(names []types.AgentName) []types.AgentName {
 	return out
 }
 
-// resolvePathInstructions trims every entry and drops the ones left without a
-// path or without instruction text that survives prompt rendering, so the
-// resolved config never carries an entry the review step would have to skip.
-// Parsing already rejects those, but Merge also runs on configs built in code.
-func resolvePathInstructions(entries []PathInstruction) []PathInstruction {
+// resolvePathInstructions trims every entry, stamps it with the configuration it
+// came from, and drops the ones left without a path or without instruction text
+// that survives prompt rendering, so the resolved config never carries an entry
+// the review step would have to skip. Parsing already rejects those, but Merge
+// also runs on configs built in code. The source is applied here rather than
+// read from the entry so a decoded value can never carry one.
+func resolvePathInstructions(entries []PathInstruction, source InstructionSource) []PathInstruction {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -1090,6 +1249,7 @@ func resolvePathInstructions(entries []PathInstruction) []PathInstruction {
 		trimmed := PathInstruction{
 			Path:         strings.TrimSpace(entry.Path),
 			Instructions: strings.TrimSpace(entry.Instructions),
+			Source:       source,
 		}
 		if trimmed.Path == "" || RenderedInstructions(trimmed.Instructions) == "" {
 			continue
@@ -1100,6 +1260,39 @@ func resolvePathInstructions(entries []PathInstruction) []PathInstruction {
 		return nil
 	}
 	return out
+}
+
+// resolveDocumentInstructions keeps one block per configured source, dropping
+// text that prompt rendering would reduce to nothing.
+func resolveDocumentInstructions(blocks ...DocumentInstruction) []DocumentInstruction {
+	var out []DocumentInstruction
+	for _, block := range blocks {
+		text := strings.TrimSpace(block.Text)
+		if RenderedInstructions(text) == "" {
+			continue
+		}
+		out = append(out, DocumentInstruction{Source: block.Source, Text: text})
+	}
+	return out
+}
+
+// repoInstructionsFor selects the repo_instructions entry describing the
+// repository checked out at checkout. Matching is worktrees.Canonical on both
+// sides, so a key and a recorded checkout path that name the same directory in
+// different spellings still match, exactly as worktree_roots resolves placement.
+// An empty checkout - every caller that merges without a repository in hand -
+// matches nothing, which is the same outcome as a key naming another repository.
+func repoInstructionsFor(entries map[string]RepoInstructions, checkout string) RepoInstructions {
+	if len(entries) == 0 || strings.TrimSpace(checkout) == "" {
+		return RepoInstructions{}
+	}
+	wanted := worktrees.Canonical(checkout)
+	for key, entry := range entries {
+		if worktrees.Canonical(key) == wanted {
+			return entry
+		}
+	}
+	return RepoInstructions{}
 }
 
 // defaultConfigYAML is the template written when no global config file exists.
@@ -1234,6 +1427,33 @@ log_level: info
 # root, and it must be outside NM_HOME and outside every checkout.
 # worktree_roots:
 #   /Users/you/src/my-repo: /Users/you/work/my-repo-runs
+
+# Your own review and documentation guidance, for repositories you cannot
+# commit a .no-mistakes.yaml to (optional). review.path_instructions and
+# document.instructions here apply to EVERY gated repository; the same two
+# fields under repo_instructions apply to one, keyed by the checkout path you
+# ran "no-mistakes init" in, exactly like worktree_roots. Both are additive:
+# they add requirements to a pass and can never weaken one, which is why this
+# surface covers those two fields only - commands, agent, no_ci,
+# allow_repo_commands, and pr.base_branch still come from the repository's own
+# trusted default branch. Every block reaches the agent labelled with the
+# configuration it came from.
+# review:
+#   path_instructions:
+#     - path: "**/*.vue"
+#       instructions: |
+#         Repeated instances of a component are driven from a computed,
+#         not stacked v-ifs.
+# repo_instructions:
+#   /Users/you/src/my-repo:
+#     review:
+#       path_instructions:
+#         - path: "**/*.cs"
+#           instructions: |
+#             Sync wording is always "sync from upstream" - a one-way overwrite.
+#     document:
+#       instructions: |
+#         Configuration keys are owned by docs/reference/config.md.
 
 # Maximum follow-up auto-fix attempts per step (0 = disabled after the initial pass)
 # Document fixes are attempted during the initial document pass.
@@ -2221,6 +2441,25 @@ func LoadGlobalFromBytes(data []byte) (*GlobalConfig, error) {
 		}
 		cfg.WorktreeRoots = raw.WorktreeRoots
 	}
+	// Validated here for the same reason the repository's own copy is validated
+	// at parse time: an over-budget or unusable rule must abort before a run
+	// starts, not fail an agent invocation at review time. Global config is read
+	// by every command, so a bad entry is reported the first time it is written
+	// rather than the first time a review runs.
+	if err := validateReviewPathInstructions("review.path_instructions", raw.Review.PathInstructions, MaxOperatorReviewPathInstructions, MaxOperatorReviewPathInstructionsBytes); err != nil {
+		return nil, err
+	}
+	if err := validateDocumentRaw("document.instructions", raw.Document); err != nil {
+		return nil, err
+	}
+	cfg.Review = raw.Review
+	cfg.Document = raw.Document
+	if raw.RepoInstructions != nil {
+		if err := ValidateRepoInstructions(raw.RepoInstructions); err != nil {
+			return nil, err
+		}
+		cfg.RepoInstructions = raw.RepoInstructions
+	}
 	timeoutValue := raw.CITimeout
 	if timeoutValue == "" {
 		timeoutValue = raw.BabysitTimeout
@@ -2513,28 +2752,96 @@ func validatePRRaw(pr PRRaw) error {
 // invalid block has to fail here, before it merges, rather than brick the
 // repository's pipeline afterwards. Do not scope this to the trusted copy.
 func validateReviewRaw(review ReviewRaw) error {
-	if len(review.PathInstructions) > MaxReviewPathInstructions {
-		return fmt.Errorf("review.path_instructions has %d entries, at most %d are allowed", len(review.PathInstructions), MaxReviewPathInstructions)
+	return validateReviewPathInstructions("review.path_instructions", review.PathInstructions, MaxReviewPathInstructions, MaxReviewPathInstructionsBytes)
+}
+
+// validateReviewPathInstructions is the shared per-source check. label names the
+// configuration key in every message, because the same list can now arrive from
+// three files and an error that does not say which one is not actionable. Each
+// source is measured against its own budget; see MaxReviewPathInstructionsBytes
+// for why the combined set is bounded by construction rather than by a check.
+func validateReviewPathInstructions(label string, entries []PathInstruction, maxEntries, maxBytes int) error {
+	if len(entries) > maxEntries {
+		return fmt.Errorf("%s has %d entries, at most %d are allowed", label, len(entries), maxEntries)
 	}
-	for i, entry := range review.PathInstructions {
+	for i, entry := range entries {
 		path := strings.TrimSpace(entry.Path)
 		if path == "" {
-			return fmt.Errorf("review.path_instructions[%d].path must not be empty", i)
+			return fmt.Errorf("%s[%d].path must not be empty", label, i)
 		}
 		if strings.TrimSpace(entry.Instructions) == "" {
-			return fmt.Errorf("review.path_instructions[%d].instructions must not be empty (path %q)", i, path)
+			return fmt.Errorf("%s[%d].instructions must not be empty (path %q)", label, i, path)
 		}
 		if RenderedInstructions(entry.Instructions) == "" {
-			return fmt.Errorf("review.path_instructions[%d].instructions for path %q is left empty once merge-conflict markers are removed; write the rule without <<<<<<<, =======, or >>>>>>>", i, path)
+			return fmt.Errorf("%s[%d].instructions for path %q is left empty once merge-conflict markers are removed; write the rule without <<<<<<<, =======, or >>>>>>>", label, i, path)
 		}
 		if err := validatePathInstructionGlob(path); err != nil {
-			return fmt.Errorf("review.path_instructions[%d].path %q is not a valid glob: %w", i, path, err)
+			return fmt.Errorf("%s[%d].path %q is not a valid glob: %w", label, i, path, err)
 		}
 	}
-	if total := ReviewPathInstructionsBytes(review.PathInstructions); total > MaxReviewPathInstructionsBytes {
-		return fmt.Errorf("review.path_instructions would add up to %d bytes to the review prompt, at most %d are allowed so the prompt stays within budget", total, MaxReviewPathInstructionsBytes)
+	if total := ReviewPathInstructionsBytes(entries); total > maxBytes {
+		return fmt.Errorf("%s would add up to %d bytes to the review prompt, at most %d are allowed so the prompt stays within budget", label, total, maxBytes)
 	}
 	return nil
+}
+
+// validateDocumentRaw rejects a documentation policy that would reach the
+// document gate as an empty block, the same way review instructions are
+// rejected. An unset value is valid and means the built-in policy stands alone.
+func validateDocumentRaw(label string, document DocumentRaw) error {
+	if strings.TrimSpace(document.Instructions) == "" {
+		return nil
+	}
+	if RenderedInstructions(document.Instructions) == "" {
+		return fmt.Errorf("%s is left empty once merge-conflict markers are removed; write the policy without <<<<<<<, =======, or >>>>>>>", label)
+	}
+	return nil
+}
+
+// ValidateRepoInstructions checks a repo_instructions map before any run reads
+// it. Keys follow worktree_roots exactly - an absolute registered checkout path,
+// canonicalized so two spellings of one checkout cannot both be present. The
+// duplicate rejection is what makes "at most one repo_instructions entry applies
+// to a run" a fact rather than a hope, which is what bounds the assembled review
+// section (see MaxReviewPathInstructionsBytes).
+//
+// A relative key is rejected for the reason worktree_roots rejects a relative
+// value: the daemon that resolves it has an unrelated working directory, so the
+// entry would name a different repository depending on who started the run.
+func ValidateRepoInstructions(entries map[string]RepoInstructions) error {
+	checkouts := make(map[string]string, len(entries))
+	for _, checkout := range sortedInstructionKeys(entries) {
+		if strings.TrimSpace(checkout) == "" {
+			return fmt.Errorf("invalid repo_instructions: empty checkout path")
+		}
+		if !filepath.IsAbs(checkout) {
+			return fmt.Errorf("invalid repo_instructions: checkout path %q is not absolute", checkout)
+		}
+		canonical := worktrees.Canonical(checkout)
+		if first, dup := checkouts[canonical]; dup {
+			return fmt.Errorf("invalid repo_instructions[%q]: %q already names the same checkout", checkout, first)
+		}
+		checkouts[canonical] = checkout
+		entry := entries[checkout]
+		if err := validateReviewPathInstructions(fmt.Sprintf("repo_instructions[%q].review.path_instructions", checkout), entry.Review.PathInstructions, MaxOperatorReviewPathInstructions, MaxOperatorReviewPathInstructionsBytes); err != nil {
+			return err
+		}
+		if err := validateDocumentRaw(fmt.Sprintf("repo_instructions[%q].document.instructions", checkout), entry.Document); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// sortedInstructionKeys keeps validation errors deterministic, for the reason
+// sortedKeys does for worktree_roots.
+func sortedInstructionKeys(entries map[string]RepoInstructions) []string {
+	keys := make([]string, 0, len(entries))
+	for key := range entries {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // validatePathInstructionGlob mirrors how ignore_patterns are matched: a
@@ -3063,16 +3370,29 @@ func (c *Config) AutoFixLimit(step types.StepName) int {
 	}
 }
 
-// Merge combines global and per-repo config. Per-repo agent values, including
-// ordered fallback lists, override global agent values when non-empty. Commands
-// and ignore patterns come from repo config only.
+// Merge combines global and per-repo config for a caller that has no registered
+// repository in hand. It resolves the operator's global review and documentation
+// guidance but not the per-repository half, which needs a checkout path to
+// select an entry; callers that know theirs use MergeForCheckout.
 func Merge(global *GlobalConfig, repo *RepoConfig) *Config {
-	return merge(global, repo, nil)
+	return merge(global, repo, nil, "")
 }
 
 // MergeForRemote combines global and per-repo config, applying a matching
 // machine-local repository override between the global defaults and repo config.
 func MergeForRemote(global *GlobalConfig, repo *RepoConfig, remote string) *Config {
+	return MergeForRepository(global, repo, remote, "")
+}
+
+// MergeForCheckout resolves operator guidance for a registered checkout when
+// no remote identity is available. Daemon callers use MergeForRepository.
+func MergeForCheckout(global *GlobalConfig, repo *RepoConfig, checkout string) *Config {
+	return merge(global, repo, nil, checkout)
+}
+
+// MergeForRepository retains remote-keyed commit/title overrides alongside
+// checkout-keyed guidance. checkout is Repo.WorkingPath, never a run worktree.
+func MergeForRepository(global *GlobalConfig, repo *RepoConfig, remote, checkout string) *Config {
 	var override *RepositoryOverride
 	if global != nil {
 		if key, err := normalizeRepositoryRemote(remote); err == nil {
@@ -3081,10 +3401,10 @@ func MergeForRemote(global *GlobalConfig, repo *RepoConfig, remote string) *Conf
 			}
 		}
 	}
-	return merge(global, repo, override)
+	return merge(global, repo, override, checkout)
 }
 
-func merge(global *GlobalConfig, repo *RepoConfig, override *RepositoryOverride) *Config {
+func merge(global *GlobalConfig, repo *RepoConfig, override *RepositoryOverride, checkout string) *Config {
 	af := autoFixDefaults()
 	applyAutoFixOverrides(&af, &global.AutoFix)
 	applyAutoFixOverrides(&af, &repo.AutoFix)
@@ -3170,6 +3490,8 @@ func merge(global *GlobalConfig, repo *RepoConfig, override *RepositoryOverride)
 		pr.TitleFormat = *repo.PR.TitleFormat
 	}
 
+	scoped := repoInstructionsFor(global.RepoInstructions, checkout)
+
 	cfg := &Config{
 		Agent:                 global.Agent,
 		Agents:                copyAgents(global.Agents),
@@ -3202,14 +3524,30 @@ func merge(global *GlobalConfig, repo *RepoConfig, override *RepositoryOverride)
 		Commit:         commit,
 		Intent:         intent,
 		Test:           test,
-		Document:       Document{Instructions: strings.TrimSpace(repo.Document.Instructions)},
-		// repo is the EffectiveRepoConfig result, so both values are already
-		// trusted-only. Like document.instructions and test.instructions, the
-		// review block is resolved from the repository alone - global config
-		// carries no review block to overlay.
+		// Review and documentation guidance is the one place three
+		// configurations compose instead of overriding one another. They are not
+		// competing statements: an operator rule and a repository rule are both
+		// true, and a repository that configures none should still get the
+		// operator's - that is the whole point of the operator surface, which
+		// exists for repositories the operator cannot commit a .no-mistakes.yaml
+		// to. Order runs from the widest scope to the narrowest so the
+		// repository's own rubric reads last, and every block carries its source
+		// into the prompt, so nothing here can pass operator policy off as the
+		// repository's. Both are strictly additive: an operator can only add
+		// requirements to a pass here, never remove one (see
+		// GlobalConfig.Review).
+		Document: Document{Instructions: resolveDocumentInstructions(
+			DocumentInstruction{Source: InstructionSourceOperatorGlobal, Text: global.Document.Instructions},
+			DocumentInstruction{Source: InstructionSourceOperatorRepo, Text: scoped.Document.Instructions},
+			DocumentInstruction{Source: InstructionSourceRepository, Text: repo.Document.Instructions},
+		)},
 		Review: Review{
-			Conversation:     repo.Review.Conversation,
-			PathInstructions: resolvePathInstructions(repo.Review.PathInstructions),
+			Conversation: repo.Review.Conversation,
+			PathInstructions: slices.Concat(
+				resolvePathInstructions(global.Review.PathInstructions, InstructionSourceOperatorGlobal),
+				resolvePathInstructions(scoped.Review.PathInstructions, InstructionSourceOperatorRepo),
+				resolvePathInstructions(repo.Review.PathInstructions, InstructionSourceRepository),
+			),
 		},
 		PR:            pr,
 		ForgeProfiles: global.ForgeProfiles,

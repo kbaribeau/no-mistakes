@@ -546,7 +546,7 @@ func TestMerge_CarriesReviewPathInstructions(t *testing.T) {
 	if len(got.Review.PathInstructions) != 1 {
 		t.Fatalf("path_instructions = %v, want only the usable entry", got.Review.PathInstructions)
 	}
-	want := PathInstruction{Path: "internal/scm/**", Instructions: "check redaction"}
+	want := PathInstruction{Path: "internal/scm/**", Instructions: "check redaction", Source: InstructionSourceRepository}
 	if got.Review.PathInstructions[0] != want {
 		t.Fatalf("path_instructions[0] = %v, want %v", got.Review.PathInstructions[0], want)
 	}

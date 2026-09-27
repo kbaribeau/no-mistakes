@@ -12,9 +12,16 @@ import (
 )
 
 // wantBlock builds the exact rendered block for one rule so assertions compare
-// full expected output rather than checking that a substring is present.
+// full expected output rather than checking that a substring is present. The
+// fixtures in this file model a repository's own committed rubric, which is what
+// sectionFor stamps on them; wantBlockFrom covers the operator sources.
 func wantBlock(path, files, instructions string) string {
+	return wantBlockFrom(config.InstructionSourceRepository, path, files, instructions)
+}
+
+func wantBlockFrom(source config.InstructionSource, path, files, instructions string) string {
 	return config.ReviewPathInstructionsPathLabel + path + "\n" +
+		config.ReviewPathInstructionsSourceLabel + string(source) + "\n" +
 		config.ReviewPathInstructionsFilesLabel + files + "\n" +
 		config.ReviewPathInstructionsRulesLabel + "\n" +
 		instructions
@@ -27,8 +34,19 @@ func wantSection(blocks ...string) string {
 	return "\n\n" + config.ReviewPathInstructionsHeading + "\n" + strings.Join(blocks, "\n\n")
 }
 
+// sectionFor renders the section for rules that model a repository's own
+// committed rubric, which config.Merge stamps as such before the step sees them.
 func sectionFor(changed []string, rules []config.PathInstruction) string {
-	return reviewPathInstructionsSection(matchPathInstructions(changed, rules))
+	return reviewPathInstructionsSection(matchPathInstructions(changed, fromRepository(rules)))
+}
+
+func fromRepository(rules []config.PathInstruction) []config.PathInstruction {
+	out := make([]config.PathInstruction, 0, len(rules))
+	for _, rule := range rules {
+		rule.Source = config.InstructionSourceRepository
+		out = append(out, rule)
+	}
+	return out
 }
 
 func TestMatchPathInstructions(t *testing.T) {
@@ -448,6 +466,7 @@ func TestReviewPathInstructionsSectionStaysWithinAccountedBytes(t *testing.T) {
 		entries = append(entries, config.PathInstruction{
 			Path:         fmt.Sprintf("internal/package_number_%02d/**", i),
 			Instructions: fmt.Sprintf("Rule %02d: %s", i, strings.Repeat("guidance ", 12)),
+			Source:       config.InstructionSourceOperatorGlobal,
 		})
 		for f := 0; f < 40; f++ {
 			changed = append(changed, fmt.Sprintf("internal/package_number_%02d/some/deeply/nested/file_%02d.go", i, f))
@@ -466,7 +485,9 @@ func TestReviewPathInstructionsSectionStaysWithinAccountedBytes(t *testing.T) {
 
 	// A single entry with a single short file is the tight case: the accounting
 	// may only exceed the real section by the unused matched-file allowance.
-	one := []config.PathInstruction{{Path: "a/**", Instructions: "check it"}}
+	// The longest source label, so the only allowance left unused is the
+	// matched-file one.
+	one := []config.PathInstruction{{Path: "a/**", Instructions: "check it", Source: config.InstructionSourceOperatorGlobal}}
 	oneSection := reviewPathInstructionsSection(matchPathInstructions([]string{"a/b.go"}, one))
 	slack := config.ReviewPathInstructionsBytes(one) - len(oneSection)
 	if slack < 0 || slack > config.ReviewPathInstructionsMaxFilesBytes {
@@ -532,7 +553,7 @@ func TestLogPathInstructions(t *testing.T) {
 	var logged []string
 	matches := pathInstructionMatches{
 		Blocks: []pathInstructionBlock{
-			{Path: "internal/scm/**", Instructions: "x", Files: []string{"internal/scm/a.go", "internal/scm/b.go"}},
+			{Path: "internal/scm/**", Source: config.InstructionSourceRepository, Instructions: "x", Files: []string{"internal/scm/a.go", "internal/scm/b.go"}},
 		},
 		UnmatchedIDs: []string{"docs/**"},
 		DuplicateIDs: []string{"internal/scm/**"},
@@ -541,7 +562,7 @@ func TestLogPathInstructions(t *testing.T) {
 	logPathInstructions(func(s string) { logged = append(logged, s) }, matches)
 
 	for _, want := range []string{
-		"applied 1 trusted review instruction block(s) for changed paths: internal/scm/** (2 file(s))",
+		"applied 1 trusted review instruction block(s) for changed paths: internal/scm/** [" + string(config.InstructionSourceRepository) + "] (2 file(s))",
 		"1 trusted review instruction rule(s) matched no changed path: docs/**",
 		"skipped 1 duplicate trusted review instruction rule(s): internal/scm/**",
 		"skipped 1 trusted review instruction rule(s) with no usable path or instructions: (no path)",
@@ -577,7 +598,7 @@ func TestEvidence_ReviewPathInstructionsMatchedPrompt(t *testing.T) {
 	}
 	changed := changedPathList("internal/scm/github/github.go\x00internal/scm/github/github_test.go\x00docs/notes.md\x00")
 
-	matches := matchPathInstructions(changed, rules)
+	matches := matchPathInstructions(changed, fromRepository(rules))
 	section := reviewPathInstructionsSection(matches)
 
 	t.Logf("configured globs: %q, %q, %q", rules[0].Path, rules[1].Path, rules[2].Path)

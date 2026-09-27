@@ -227,7 +227,7 @@ func TestProtectedPathRefusalSurvivesFailedTrustedRecovery(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			recoverOnStartup(database, p, mgr, layout)
+			recoverOnStartup(database, p, mgr, layout, config.DefaultGlobalConfig())
 			assertProtectedWorktreePreserved(t, workDir, head)
 			cleanupOrphanWorktrees(database, p, nil)
 			assertProtectedWorktreePreserved(t, workDir, head)

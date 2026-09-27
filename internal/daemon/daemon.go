@@ -261,7 +261,7 @@ func runWithOptionsLocked(p *paths.Paths, d *db.DB, globalCfg *config.GlobalConf
 	slog.Info("daemon process launched", "pid", pidRecord.PID)
 
 	// Recovery remains exclusive and completes before IPC is bound.
-	recoverOnStartup(d, p, mgr, layout)
+	recoverOnStartup(d, p, mgr, layout, globalCfg)
 
 	srv := ipc.NewServer()
 
@@ -397,7 +397,7 @@ func writeDaemonPIDFile(path string, record daemonPIDFile) error {
 // best-effort migrates gate bare repos in place so older installs pick up
 // the per-worktree hookspath isolation introduced for issue #122 when Git
 // supports config --worktree.
-func recoverOnStartup(d *db.DB, p *paths.Paths, mgr *RunManager, layout *worktrees.Layout) {
+func recoverOnStartup(d *db.DB, p *paths.Paths, mgr *RunManager, layout *worktrees.Layout, globalCfg *config.GlobalConfig) {
 	orphanStarted := time.Now()
 	reapOrphanedServers(p)
 	logStartupPhase("orphan_servers", orphanStarted)
@@ -454,6 +454,7 @@ func recoverOnStartup(d *db.DB, p *paths.Paths, mgr *RunManager, layout *worktre
 	logStartupPhase("stale_runs", staleStarted, "recovered", count)
 
 	reportUnusableWorktreeRoots(d, layout)
+	reportUnusableRepoInstructions(d, globalCfg.RepoInstructions)
 	leftover := leftoverRecordedRunWorktrees(d, p)
 
 	orphanProcStarted := time.Now()
@@ -751,6 +752,33 @@ func reportUnusableWorktreeRoots(d *db.DB, layout *worktrees.Layout) {
 	for _, checkout := range checkouts {
 		if !registered[checkout] {
 			slog.Warn("worktree_roots entry matches no registered repository; its runs use the default placement", "checkout", checkout)
+		}
+	}
+}
+
+// reportUnusableRepoInstructions is the repo_instructions half of the same
+// report, and it exists for the same reason: the key is matched against a
+// registered checkout path, so a stale one left by a moved or ejected checkout
+// silently steers nothing, and the only symptom is reviews continuing to run
+// without the rubric the operator wrote for that repository. Guidance that
+// never arrives has no other way to be noticed - unlike a rule that fires and
+// is ignored, which the review step logs per run.
+func reportUnusableRepoInstructions(d *db.DB, entries map[string]config.RepoInstructions) {
+	if len(entries) == 0 {
+		return
+	}
+	repos, err := d.GetRepos()
+	if err != nil {
+		slog.Warn("failed to list repositories while checking configured repo instructions", "error", err)
+		return
+	}
+	registered := make(map[string]bool, len(repos))
+	for _, repo := range repos {
+		registered[worktrees.Canonical(repo.WorkingPath)] = true
+	}
+	for checkout := range entries {
+		if !registered[worktrees.Canonical(checkout)] {
+			slog.Warn("repo_instructions entry matches no registered repository; its review and document guidance reaches no run", "checkout", checkout)
 		}
 	}
 }

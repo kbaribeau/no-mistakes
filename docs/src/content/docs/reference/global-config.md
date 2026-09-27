@@ -61,6 +61,28 @@ session_reuse: true
 worktree_roots:
   /Users/you/src/my-repo: /Users/you/work/my-repo-runs
 
+review:
+  path_instructions:
+    - path: "**/*.vue"
+      instructions: |
+        Repeated instances of a component are driven from a computed,
+        not stacked v-ifs.
+
+document:
+  instructions: |
+    Never write a postmortem into AGENTS.md.
+
+repo_instructions:
+  /Users/you/src/my-repo:
+    review:
+      path_instructions:
+        - path: "**/*.cs"
+          instructions: |
+            Sync wording is always "sync from upstream" - a one-way overwrite.
+    document:
+      instructions: |
+        Configuration keys are owned by docs/reference/config.md.
+
 forge_profiles:
   github-personal:
     gh_config_dir: ~/.config/gh-personal
@@ -721,6 +743,88 @@ Each run records the directory it was created in, so editing, adding, or removin
 The key is matched against the checkout path recorded at `init`. After moving a checkout, re-run `no-mistakes init` from the new path and update the key; a key that matches no registered repository is reported in the daemon log at startup and otherwise does nothing.
 
 `no-mistakes init --worktree-root <dir>` prints the exact entry to add for the checkout you are initializing. The global config is hand-maintained, so init never rewrites it for you.
+
+### review.path_instructions
+
+Your own review guidance, scoped to the paths a change touches, for every gated repository.
+
+|         |                                                                            |
+| ------- | -------------------------------------------------------------------------- |
+| Type    | `object[]` with `path` (`string`) and `instructions` (`string`, multiline)  |
+| Default | Empty                                                                        |
+
+The repository field of the same name, [`review.path_instructions`](/no-mistakes/reference/repo-config/#reviewpath_instructions), owns the matching rules, the block format, and how blocks reach the reviewer; everything there applies here unchanged.
+This is the same guidance held on your machine instead of in the repository, for a repository you cannot commit a `.no-mistakes.yaml` to - one you do not own, or one shared with teammates who do not use no-mistakes.
+
+Entries here apply to **every** gated repository. Guidance true of one repository belongs in [`repo_instructions`](#repo_instructions): applying one application's domain rules while reviewing a sibling application is worse than applying none, because a confidently wrong finding costs more attention than a missing one.
+
+At most 16 entries are allowed, and they may not exceed 8,192 bytes measured the way the repository field is measured. That budget is separate from the repository's own and from `repo_instructions`', so no source reduces another's; see [Budget](#budget) below.
+
+### document.instructions
+
+Your own documentation ownership policy, for every gated repository.
+
+|         |                     |
+| ------- | ------------------- |
+| Type    | `string` (multiline) |
+| Default | Empty                |
+
+The repository field of the same name, [`document.instructions`](/no-mistakes/reference/repo-config/#documentinstructions), owns what this text is for; this is the same policy held on your machine. An ownership map naming one repository's files belongs in [`repo_instructions`](#repo_instructions).
+
+### repo_instructions
+
+Your own review and documentation guidance for **one** registered repository.
+
+|         |                                                                             |
+| ------- | --------------------------------------------------------------------------- |
+| Type    | `map[string]object`                                                          |
+| Keys    | Absolute registered checkout paths (what you ran `no-mistakes init` in)      |
+| Values  | An object with `review.path_instructions` and `document.instructions` only   |
+| Default | Empty                                                                         |
+
+```yaml
+repo_instructions:
+  /Users/you/src/my-repo:
+    review:
+      path_instructions:
+        - path: "**/*.cs"
+          instructions: |
+            Sync wording is always "sync from upstream" - a one-way overwrite.
+    document:
+      instructions: |
+        Configuration keys are owned by docs/reference/config.md.
+```
+
+The two fields in an entry mean exactly what the same fields mean globally and in the repository's own `.no-mistakes.yaml`; each entry carries the 16-entry, 8,192-byte review budget the global block carries.
+
+#### Scope: additive guidance only
+
+These two fields are the whole surface, and the refusal is deliberate. `commands`, `agent`, `no_ci`, `allow_repo_commands`, `pr.base_branch`, `disable_project_settings`, and `ignore_patterns` are **not** available here or anywhere else in the global config, and writing one is a load-time error rather than a silently ignored key.
+
+Extra review and documentation guidance can only *add* requirements to a pass. Durable out-of-tree configuration that could *weaken* one is precisely what reading those fields from a repository's trusted default branch exists to prevent, and moving them onto the operator's machine would not make it safe - it would make a pass mean something different depending on whose daemon ran it.
+
+#### Provenance
+
+Every block reaches the agent labelled with the configuration it came from - `this repository's default branch (trusted)`, `operator configuration for every repository`, or `operator configuration for this repository` - so nothing here can read as a rule the repository's own maintainers wrote.
+
+#### Merge order
+
+All three sources apply; none replaces another. A repository that configures nothing still gets yours, which is the point.
+Blocks are ordered from the widest scope to the narrowest - global, then `repo_instructions`, then the repository's own trusted copy - so the repository's own rubric reads last.
+Duplicate review rules (same `path` **and** same `instructions`) are injected once regardless of source.
+
+#### Budget
+
+Each source is measured against its own budget when its file is parsed, so an over-budget rule fails before a run starts rather than failing an agent invocation at review time.
+The repository keeps its full 18,432 bytes and 32 entries; the global block and the matching `repo_instructions` entry get 8,192 bytes and 16 entries each.
+At most one `repo_instructions` entry can apply to a run, so the assembled review section is bounded by the sum of the three.
+
+#### Key matching
+
+The key is matched against the checkout path recorded at `init`, canonicalized, exactly like [`worktree_roots`](#worktree_roots): a relative key is rejected at load time, two spellings of one checkout are rejected, and a key that matches no registered repository is reported in the daemon log at startup and otherwise does nothing.
+After moving a checkout, re-run `no-mistakes init` from the new path and update the key.
+
+Changing an entry affects new runs only: the daemon reads the global config when a run starts, so an edit reaches the next run without a restart and never retargets a run already in flight.
 
 ### auto_fix
 

@@ -234,7 +234,7 @@ func TestDocumentStep_TrustedPolicyInstructionsAugmentPrompt(t *testing.T) {
 		},
 	}
 	sctx := newTestContextWithDBRecords(t, ag, dir, baseSHA, headSHA, config.Commands{})
-	sctx.Config.Document.Instructions = "docs/architecture.md owns the daemon lifecycle facts."
+	sctx.Config.Document.Instructions = []config.DocumentInstruction{{Source: config.InstructionSourceRepository, Text: "docs/architecture.md owns the daemon lifecycle facts."}}
 
 	step := &DocumentStep{}
 	if _, err := step.Execute(sctx); err != nil {

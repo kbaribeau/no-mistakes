@@ -325,6 +325,14 @@ func agentNeutralGlobalConfig(data []byte) ([]byte, error) {
 	delete(raw, "agent_args_override")
 	delete(raw, "agent_config")
 	delete(raw, "review_agents")
+	// repo_instructions is keyed by an absolute checkout path on the capturing
+	// machine, and a case carries no checkout for a replay to match it against,
+	// so an entry kept here would be configuration that silently does nothing.
+	// The global review/document blocks beside it are portable and stay: they
+	// apply to every gated repository, so a replay resolves them exactly as the
+	// captured run did. Preserving the scoped half faithfully would mean
+	// recording the checkout in round provenance.
+	delete(raw, "repo_instructions")
 	out, err := yaml.Marshal(raw)
 	if err != nil {
 		return nil, fmt.Errorf("serialize agent-neutral global config: %w", err)

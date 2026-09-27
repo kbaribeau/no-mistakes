@@ -409,6 +409,8 @@ It augments or clarifies the built-in policy; it cannot disable documentation in
 
 Like `commands.*` and `agent`, this field steers gate behavior, so it is honored **only from the trusted default-branch copy** of `.no-mistakes.yaml`: a contributor's pushed branch cannot weaken the documentation rules that gate its own review.
 
+The document step states the source of every policy block it receives, so this repository's policy and an operator's ([`document.instructions`](/no-mistakes/reference/global-config/#documentinstructions) in the global config) are told apart rather than merged into one anonymous rule.
+
 ### review.conversation
 
 Whether the reviewer may ask you questions while it reviews, instead of turning every undecidable point into a finding you answer with a verdict. The [Review conversation](/no-mistakes/concepts/review-conversation/) concept page owns the protocol, the state machine, and what is persisted.
@@ -454,14 +456,17 @@ review:
         Prose changes only. Do not request test coverage.
 ```
 
-Each matched rule reaches the reviewer with the scope it was selected for, so a rule scoped to one directory can never read as a repository-wide instruction:
+Each matched rule reaches the reviewer with the scope it was selected for, so a rule scoped to one directory can never read as a repository-wide instruction, and with the configuration it came from, so an operator's rule is never presented as this repository's own:
 
 ```
 path: docs/**
+source: this repository's default branch (trusted)
 matched files: docs/notes.md
 instructions:
 Prose changes only. Do not request test coverage.
 ```
+
+The same guidance can also come from your own machine, for a repository you cannot commit this file to: see [`review.path_instructions`](/no-mistakes/reference/global-config/#reviewpath_instructions) and [`repo_instructions`](/no-mistakes/reference/global-config/#repo_instructions) in the global config.
 
 #### Matching
 
@@ -479,8 +484,10 @@ The step log names the rules it applied and the rules that matched nothing, so a
 
 `instructions` is prompt text, so merge-conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) are removed from it and runs of whitespace are collapsed, exactly as for [`document.instructions`](#documentinstructions). Write rules without those tokens; a value that would be left empty once they are removed is rejected rather than silently dropped.
 
-At most 32 entries are allowed, and the assembled prompt section may not exceed 16,384 bytes, because the injected text shares the review prompt's budget and an oversized prompt fails the agent invocation outright.
-The size is measured on what is actually injected: the heading, and for every entry its labels, its `path`, its `instructions`, and a 192-byte allowance for its matched-file list. A block whose matched-file list would exceed that allowance is truncated with a `+N more` suffix, so the measured limit holds for any diff.
+At most 32 entries are allowed, and the assembled prompt section may not exceed 18,432 bytes, because the injected text shares the review prompt's budget and an oversized prompt fails the agent invocation outright.
+The size is measured on what is actually injected: the heading, and for every entry its labels, its `path`, its `instructions`, a 43-byte allowance for its source label, and a 192-byte allowance for its matched-file list. A block whose matched-file list would exceed that allowance is truncated with a `+N more` suffix, so the measured limit holds for any diff.
+
+This budget is for this file's entries alone. The operator-owned surfaces in the global config carry their own separate, smaller budgets, so a repository's own limit is never reduced by what an operator configured.
 
 A missing `path` or `instructions` value, an `instructions` value that renders empty, a `path` that is not a valid glob, or a config over either limit fails when the config is parsed, so the run aborts before an agent starts instead of silently dropping guidance.
 These checks run on whichever copy of the file is parsed, including the pushed branch's. A pushed branch's blocks are ignored when the review prompt is built (see [Trust](#trust) below), but an invalid block on that branch still fails its own run, so a broken rule surfaces before it merges and becomes the trusted copy.
@@ -488,6 +495,8 @@ These checks run on whichever copy of the file is parsed, including the pushed b
 #### Trust
 
 Like `document.instructions`, this field steers gate behavior, so it is honored **only from the trusted default-branch copy** of `.no-mistakes.yaml`, regardless of [`allow_repo_commands`](#allow_repo_commands): a value present only on a pushed branch is ignored, so a contributor cannot inject instructions into the review that gates them.
+
+The operator-owned surfaces in the global config do not change that boundary. They are on the operator's own machine, which no contributor can reach, and they cover these two additive fields only.
 
 ### gates
 

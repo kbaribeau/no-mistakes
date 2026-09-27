@@ -9,10 +9,13 @@ import (
 )
 
 // pathInstructionBlock is one trusted rule that matched the change, together
-// with the files it matched. The reviewer reads the scope and the rule as one
-// unit, so no block can be mistaken for a repository-wide instruction.
+// with the files it matched and the configuration it came from. The reviewer
+// reads the scope and the rule as one unit, so no block can be mistaken for a
+// repository-wide instruction, and it reads the source with them, so no block
+// can be mistaken for the repository's own rubric when the operator wrote it.
 type pathInstructionBlock struct {
 	Path         string
+	Source       config.InstructionSource
 	Instructions string
 	Files        []string
 }
@@ -41,7 +44,10 @@ type pathInstructionMatches struct {
 // maintainer has one path-matching model to learn. Two entries with the same
 // path and the same instructions collapse to one block; the same instruction
 // text under two different globs stays two blocks, because each block states
-// the scope it was selected for.
+// the scope it was selected for. Deduplication ignores the source on purpose:
+// an operator who has already written a rule the repository also states does not
+// need to read it twice, and the first source in config order keeps the block,
+// which is the widest scope the rule actually holds at.
 func matchPathInstructions(changed []string, rules []config.PathInstruction) pathInstructionMatches {
 	var out pathInstructionMatches
 	if len(rules) == 0 {
@@ -68,11 +74,24 @@ func matchPathInstructions(changed []string, rules []config.PathInstruction) pat
 		}
 		out.Blocks = append(out.Blocks, pathInstructionBlock{
 			Path:         pattern,
+			Source:       sourceOrUnattributed(rule.Source),
 			Instructions: instructions,
 			Files:        files,
 		})
 	}
 	return out
+}
+
+// sourceOrUnattributed keeps the block's provenance line honest for a rule that
+// reached the step without one. config.Merge stamps every entry it resolves, so
+// this covers configurations assembled in code; naming it unattributed rather
+// than defaulting to a real source avoids crediting an operator rule to the
+// repository, or the reverse.
+func sourceOrUnattributed(source config.InstructionSource) config.InstructionSource {
+	if source == "" {
+		return "unattributed configuration"
+	}
+	return source
 }
 
 // pathInstructionID names an entry in a log line when its path is unusable.
@@ -151,6 +170,7 @@ func reviewPathInstructionsSection(matches pathInstructionMatches) string {
 	for _, block := range matches.Blocks {
 		rendered = append(rendered,
 			config.ReviewPathInstructionsPathLabel+block.Path+"\n"+
+				config.ReviewPathInstructionsSourceLabel+string(block.Source)+"\n"+
 				config.ReviewPathInstructionsFilesLabel+matchedFilesSummary(block.Files)+"\n"+
 				config.ReviewPathInstructionsRulesLabel+"\n"+
 				block.Instructions)
@@ -168,7 +188,7 @@ func logPathInstructions(log func(string), matches pathInstructionMatches) {
 	if len(matches.Blocks) > 0 {
 		scopes := make([]string, 0, len(matches.Blocks))
 		for _, block := range matches.Blocks {
-			scopes = append(scopes, fmt.Sprintf("%s (%d file(s))", block.Path, len(block.Files)))
+			scopes = append(scopes, fmt.Sprintf("%s [%s] (%d file(s))", block.Path, block.Source, len(block.Files)))
 		}
 		log(fmt.Sprintf("applied %d trusted review instruction block(s) for changed paths: %s", len(matches.Blocks), strings.Join(scopes, "; ")))
 	}

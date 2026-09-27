@@ -128,6 +128,7 @@ func TestReviewPathInstructionsJourney(t *testing.T) {
 		// The matching rule arrives naming its glob and the files it matched, so
 		// a narrow rule cannot read as a repository-wide instruction.
 		wantBlock := config.ReviewPathInstructionsPathLabel + "internal/scm/**\n" +
+			config.ReviewPathInstructionsSourceLabel + string(config.InstructionSourceRepository) + "\n" +
 			config.ReviewPathInstructionsFilesLabel + "internal/scm/github/github.go\n" +
 			config.ReviewPathInstructionsRulesLabel + "\n" + scmPathRule
 		if !strings.Contains(prompt, wantBlock) {
@@ -154,7 +155,8 @@ func TestReviewPathInstructionsJourney(t *testing.T) {
 			t.Fatalf("axi logs: %v\n%s", err, logs)
 		}
 		for _, want := range []string{
-			"applied 1 trusted review instruction block(s) for changed paths: internal/scm/** (1 file(s))",
+			"applied 1 trusted review instruction block(s) for changed paths: internal/scm/** [" +
+				string(config.InstructionSourceRepository) + "] (1 file(s))",
 			"1 trusted review instruction rule(s) matched no changed path: docs/**",
 		} {
 			if !strings.Contains(logs, want) {

@@ -1474,6 +1474,14 @@ func TestReviewStep_RereviewFlagsIntentContradictionAsAskUser(t *testing.T) {
 // the agent received.
 func reviewPromptFor(t *testing.T, rules []config.PathInstruction) string {
 	t.Helper()
+	return reviewPromptForResolved(t, config.Review{PathInstructions: fromRepository(rules)})
+}
+
+// reviewPromptForResolved is the same for a review config already resolved by
+// config.Merge, which is what stamps each rule with the configuration it came
+// from.
+func reviewPromptForResolved(t *testing.T, review config.Review) string {
+	t.Helper()
 	dir, baseSHA, headSHA := setupGitRepo(t)
 
 	ag := &mockAgent{
@@ -1484,7 +1492,7 @@ func reviewPromptFor(t *testing.T, rules []config.PathInstruction) string {
 		},
 	}
 	sctx := newTestContextWithDBRecords(t, ag, dir, baseSHA, headSHA, config.Commands{})
-	sctx.Config.Review = config.Review{PathInstructions: rules}
+	sctx.Config.Review = review
 
 	if _, err := (&ReviewStep{}).Execute(sctx); err != nil {
 		t.Fatal(err)
@@ -1581,7 +1589,7 @@ func TestReviewStep_PushedIgnorePatternsCannotSuppressPathInstructions(t *testin
 		},
 	}
 	sctx := newTestContextWithDBRecords(t, ag, dir, baseSHA, headSHA, config.Commands{})
-	sctx.Config.Review = config.Review{PathInstructions: rules}
+	sctx.Config.Review = config.Review{PathInstructions: fromRepository(rules)}
 	// The branch adds a source file so the run still has something to review,
 	// and ignores the fixture the trusted rule is scoped to.
 	os.WriteFile(filepath.Join(dir, "app.go"), []byte("package main\n"), 0o644)
