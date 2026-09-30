@@ -48,9 +48,6 @@ review:
     - path: "**/*.vue"
       instructions: |
         Repeated components come from a computed, not stacked v-ifs.
-document:
-  instructions: |
-    Never write a postmortem into AGENTS.md.
 `)
 
 	cfg := Merge(global, &RepoConfig{})
@@ -66,11 +63,8 @@ document:
 		t.Errorf("source = %q, want %q", entry.Source, InstructionSourceOperatorGlobal)
 	}
 
-	if len(cfg.Document.Instructions) != 1 {
-		t.Fatalf("document instructions = %v, want the operator's block", cfg.Document.Instructions)
-	}
-	if got := cfg.Document.Instructions[0]; got.Source != InstructionSourceOperatorGlobal || !strings.Contains(got.Text, "postmortem") {
-		t.Errorf("document instructions[0] = %+v", got)
+	if len(cfg.Document.Instructions) != 0 {
+		t.Fatalf("global-only guidance unexpectedly supplied document policy: %v", cfg.Document.Instructions)
 	}
 }
 
@@ -148,8 +142,6 @@ func TestMergeForCheckout_ConcatenatesEverySourceWidestFirst(t *testing.T) {
 		"  path_instructions:\n"+
 		"    - path: \"**/*.vue\"\n"+
 		"      instructions: every repository\n"+
-		"document:\n"+
-		"  instructions: global doc policy\n"+
 		"repo_instructions:\n"+
 		"  "+yamlPath(checkout)+":\n"+
 		"    review:\n"+
@@ -185,12 +177,11 @@ func TestMergeForCheckout_ConcatenatesEverySourceWidestFirst(t *testing.T) {
 	}
 
 	wantDocs := []DocumentInstruction{
-		{Source: InstructionSourceOperatorGlobal, Text: "global doc policy"},
 		{Source: InstructionSourceOperatorRepo, Text: "scoped doc policy"},
 		{Source: InstructionSourceRepository, Text: "repo doc policy"},
 	}
 	if len(cfg.Document.Instructions) != len(wantDocs) {
-		t.Fatalf("document instructions = %v, want all three sources", cfg.Document.Instructions)
+		t.Fatalf("document instructions = %v, want scoped operator and repository sources", cfg.Document.Instructions)
 	}
 	for i, want := range wantDocs {
 		if cfg.Document.Instructions[i] != want {
@@ -215,12 +206,12 @@ func TestLoadGlobal_RepoInstructionsRefusesEveryFieldThatCouldWeakenAPass(t *tes
 		"    ignore_patterns:\n      - \"**\"\n",
 	} {
 		yaml := "repo_instructions:\n  " + yamlPath(checkout) + ":\n" + block
-		loadGlobalWantError(t, yaml, "repo_instructions supports review and document only")
+		loadGlobalWantError(t, yaml, "not found in type")
 	}
 }
 
 // The same boundary at the top level, where the global config's strict decoding
-// already refuses an unknown key outright: adding review and document to it must
+// already refuses an unknown key outright: adding review to it must
 // not have opened a door for the fields beside them in a repository config.
 func TestLoadGlobal_TopLevelOperatorSurfaceCarriesNoExecutingOrGateFields(t *testing.T) {
 	for _, yaml := range []string{
@@ -280,7 +271,7 @@ func TestLoadGlobal_OperatorReviewPathInstructionsAreBudgetedPerSource(t *testin
 		"review:\n  path_instructions:\n    - path: \"[\"\n      instructions: rule\n",
 		"is not a valid glob")
 	loadGlobalWantError(t,
-		"document:\n  instructions: \"=======\"\n",
+		"repo_instructions:\n  "+yamlPath(checkout)+":\n    document:\n      instructions: \"=======\"\n",
 		"document.instructions is left empty once merge-conflict markers are removed")
 }
 

@@ -409,7 +409,7 @@ It augments or clarifies the built-in policy; it cannot disable documentation in
 
 Like `commands.*` and `agent`, this field steers gate behavior, so it is honored **only from the trusted default-branch copy** of `.no-mistakes.yaml`: a contributor's pushed branch cannot weaken the documentation rules that gate its own review.
 
-The document step states the source of every policy block it receives, so this repository's policy and an operator's ([`document.instructions`](/no-mistakes/reference/global-config/#documentinstructions) in the global config) are told apart rather than merged into one anonymous rule.
+The document step states the source of every policy block it receives, so this repository's policy and an operator's ([`repo_instructions`](/no-mistakes/reference/global-config/#repo_instructions) in the global config) are told apart rather than merged into one anonymous rule.
 
 ### review.conversation
 

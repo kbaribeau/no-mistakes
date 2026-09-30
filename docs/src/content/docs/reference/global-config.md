@@ -68,10 +68,6 @@ review:
         Repeated instances of a component are driven from a computed,
         not stacked v-ifs.
 
-document:
-  instructions: |
-    Never write a postmortem into AGENTS.md.
-
 repo_instructions:
   /Users/you/src/my-repo:
     review:
@@ -760,17 +756,6 @@ Entries here apply to **every** gated repository. Guidance true of one repositor
 
 At most 16 entries are allowed, and they may not exceed 8,192 bytes measured the way the repository field is measured. That budget is separate from the repository's own and from `repo_instructions`', so no source reduces another's; see [Budget](#budget) below.
 
-### document.instructions
-
-Your own documentation ownership policy, for every gated repository.
-
-|         |                     |
-| ------- | ------------------- |
-| Type    | `string` (multiline) |
-| Default | Empty                |
-
-The repository field of the same name, [`document.instructions`](/no-mistakes/reference/repo-config/#documentinstructions), owns what this text is for; this is the same policy held on your machine. An ownership map naming one repository's files belongs in [`repo_instructions`](#repo_instructions).
-
 ### repo_instructions
 
 Your own review and documentation guidance for **one** registered repository.
@@ -795,13 +780,13 @@ repo_instructions:
         Configuration keys are owned by docs/reference/config.md.
 ```
 
-The two fields in an entry mean exactly what the same fields mean globally and in the repository's own `.no-mistakes.yaml`; each entry carries the 16-entry, 8,192-byte review budget the global block carries.
+Review guidance uses the same matching rules as the global review block. Document guidance uses the repository's [`document.instructions`](/no-mistakes/reference/repo-config/#documentinstructions) semantics, scoped to this checkout. There is no machine-wide `document.instructions` field. Each entry carries the 16-entry, 8,192-byte review budget the global block carries.
 
 #### Scope: additive guidance only
 
-These two fields are the whole surface, and the refusal is deliberate. `commands`, `agent`, `no_ci`, `allow_repo_commands`, `pr.base_branch`, `disable_project_settings`, and `ignore_patterns` are **not** available here or anywhere else in the global config, and writing one is a load-time error rather than a silently ignored key.
+These two fields are the whole `repo_instructions` surface. `commands`, `agent`, `no_ci`, `allow_repo_commands`, `pr.base_branch`, `disable_project_settings`, and `ignore_patterns` are **not** available inside an entry. Unknown fields, including nested typos such as `document.instruction`, are load-time errors. This restriction does not remove supported top-level global settings such as [`agent`](#agent).
 
-Extra review and documentation guidance can only *add* requirements to a pass. Durable out-of-tree configuration that could *weaken* one is precisely what reading those fields from a repository's trusted default branch exists to prevent, and moving them onto the operator's machine would not make it safe - it would make a pass mean something different depending on whose daemon ran it.
+Guidance is appended, never substituted for repository-owned rules. It does not enable executable commands or change the trusted repository configuration boundary. Prose asks the agent to apply additional guidance; concatenation alone cannot mechanically prove that arbitrary instructions only strengthen validation.
 
 #### Provenance
 
@@ -824,7 +809,7 @@ At most one `repo_instructions` entry can apply to a run, so the assembled revie
 The key is matched against the checkout path recorded at `init`, canonicalized, exactly like [`worktree_roots`](#worktree_roots): a relative key is rejected at load time, two spellings of one checkout are rejected, and a key that matches no registered repository is reported in the daemon log at startup and otherwise does nothing.
 After moving a checkout, re-run `no-mistakes init` from the new path and update the key.
 
-Changing an entry affects new runs only: the daemon reads the global config when a run starts, so an edit reaches the next run without a restart and never retargets a run already in flight.
+New runs read the current global config without requiring a daemon restart. An uninterrupted run retains its loaded guidance. Recovery after interruption reads the current operator config again, so edits may change a recovered run's guidance. These instructions are not immutable per-run pins; existing gate and Pi pins keep their separate contracts.
 
 ### auto_fix
 

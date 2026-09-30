@@ -1040,12 +1040,11 @@ func installFakeReviewAgent(t *testing.T, p *paths.Paths, findingsJSON string) {
 // A captured case carries no checkout path, so a path-keyed repo_instructions
 // entry could never be matched at replay. It is dropped rather than stored as
 // configuration that silently does nothing, while the operator's global review
-// and document guidance - which applies to every repository, and which the
+// guidance - which applies to every repository, and which the
 // captured run's reviewer did see - is preserved.
 func TestCaptureDropsPathKeyedRepoInstructionsButKeepsGlobalGuidance(t *testing.T) {
 	pinned := []byte("log_level: warn\n" +
 		"review:\n  path_instructions:\n    - path: \"internal/**\"\n      instructions: operator rule\n" +
-		"document:\n  instructions: operator policy\n" +
 		"repo_instructions:\n  /some/other/machine/checkout:\n    document:\n      instructions: scoped policy\n")
 
 	neutral, err := agentNeutralGlobalConfig(pinned)
@@ -1067,7 +1066,7 @@ func TestCaptureDropsPathKeyedRepoInstructionsButKeepsGlobalGuidance(t *testing.
 	if len(resolved.Review.PathInstructions) != 1 || resolved.Review.PathInstructions[0].Path != "internal/**" {
 		t.Errorf("replay lost the operator's global review guidance: %#v", resolved.Review.PathInstructions)
 	}
-	if len(resolved.Document.Instructions) != 1 || resolved.Document.Instructions[0].Text != "operator policy" {
-		t.Errorf("replay lost the operator's global document guidance: %#v", resolved.Document.Instructions)
+	if len(resolved.Document.Instructions) != 0 {
+		t.Errorf("replay unexpectedly received global document guidance: %#v", resolved.Document.Instructions)
 	}
 }

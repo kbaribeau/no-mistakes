@@ -79,7 +79,7 @@ func TestReviewStep_OperatorInstructionsReachTheReviewPrompt(t *testing.T) {
 	}
 }
 
-// The document gate reads the same three sources, each block attributed. The
+// The document gate reads scoped operator and repository policy, each attributed. The
 // framing must stay "augments the defaults", because operator guidance can only
 // add to what a pass requires.
 func TestDocumentStep_PolicyBlocksFromEverySourceAreAttributed(t *testing.T) {
@@ -93,7 +93,6 @@ func TestDocumentStep_PolicyBlocksFromEverySourceAreAttributed(t *testing.T) {
 	}
 	sctx := newTestContextWithDBRecords(t, ag, dir, baseSHA, headSHA, config.Commands{})
 	sctx.Config.Document.Instructions = []config.DocumentInstruction{
-		{Source: config.InstructionSourceOperatorGlobal, Text: "Never write a postmortem into AGENTS.md."},
 		{Source: config.InstructionSourceOperatorRepo, Text: "Configuration keys are owned by docs/reference/config.md."},
 		{Source: config.InstructionSourceRepository, Text: "docs/architecture.md owns the daemon lifecycle facts."},
 	}

@@ -166,27 +166,14 @@ type GlobalConfig struct {
 	// by path ancestry and therefore never reaches a worktree under NM_HOME.
 	// Placement is resolved for every consumer in internal/worktrees.
 	WorktreeRoots map[string]string `yaml:"worktree_roots"`
-	// Review and Document carry the operator's own review and documentation
-	// guidance for EVERY gated repository. They exist because the repository
-	// copy of these fields requires write access to the repository under
-	// validation, which an operator gating their own branches in someone
-	// else's repository does not have (see RepoInstructions for the
-	// per-repository half).
-	//
-	// SECURITY: this is an operator surface at the same trust level as
-	// review_agents and agent_config - ~/.no-mistakes/config.yaml is the
-	// operator's own machine, which no contributor can reach. It does not
-	// touch the trusted-default-branch boundary those fields have in a
-	// repository config: the pushed branch gains no new influence over the
-	// reviewer that gates it. The surface is deliberately limited to these
-	// two fields, which can only ADD requirements to a pass. commands, agent,
-	// no_ci, allow_repo_commands, and pr.base_branch are NOT available here
-	// and must not be added: durable out-of-tree configuration that can weaken
-	// a pass is precisely what the trusted-default-branch rule exists to
-	// prevent.
-	Review   OperatorReviewRaw `yaml:"review"`
-	Document DocumentRaw       `yaml:"document"`
-	// RepoInstructions scopes the same two fields to ONE repository. Keys are
+	// Review carries additive operator review guidance for every gated
+	// repository. Documentation guidance belongs to a specific checkout in
+	// RepoInstructions, never to a machine-wide document block.
+	// SECURITY: operator guidance does not change the trusted-default-branch
+	// boundary of repository settings or expose new executable controls. The
+	// existing top-level Agent setting is separate from this narrow surface.
+	Review OperatorReviewRaw `yaml:"review"`
+	// RepoInstructions scopes review and document guidance to ONE repository. Keys are
 	// registered checkout paths (Repo.WorkingPath), matched exactly the way
 	// WorktreeRoots keys are, because they answer the same question: which
 	// registered repository does this operator-owned entry describe.
@@ -253,7 +240,6 @@ type globalConfigRaw struct {
 	ReviewAgents            map[string]ReviewAgent      `yaml:"review_agents"`
 	WorktreeRoots           map[string]string           `yaml:"worktree_roots"`
 	Review                  OperatorReviewRaw           `yaml:"review"`
-	Document                DocumentRaw                 `yaml:"document"`
 	RepoInstructions        map[string]RepoInstructions `yaml:"repo_instructions"`
 	CITimeout               string                      `yaml:"ci_timeout"`
 	DaemonConnectTimeout    string                      `yaml:"daemon_connect_timeout"`
@@ -468,9 +454,9 @@ type PathInstruction struct {
 // RepoInstructions is the operator's guidance for one registered repository.
 // Its two fields ARE the allowlist: the type cannot express commands, agent,
 // no_ci, allow_repo_commands, or pr.base_branch, so the boundary is structural
-// rather than a rule someone has to remember. UnmarshalYAML rejects any other
-// key rather than ignoring it, so an operator who writes one is told it has no
-// effect here instead of believing it took.
+// rather than a rule someone has to remember. Keep this a plain struct: the
+// global loader's KnownFields(true) must reach every nested key. A custom
+// UnmarshalYAML using Node.Decode would silently lose that strictness.
 type RepoInstructions struct {
 	Review   OperatorReviewRaw `yaml:"review"`
 	Document DocumentRaw       `yaml:"document"`
@@ -480,27 +466,6 @@ type RepoInstructions struct {
 // as review.conversation. Adding a repository setting must not widen this surface.
 type OperatorReviewRaw struct {
 	PathInstructions []PathInstruction `yaml:"path_instructions"`
-}
-
-func (r *RepoInstructions) UnmarshalYAML(value *yaml.Node) error {
-	type repoInstructionsRaw struct {
-		Review   OperatorReviewRaw `yaml:"review"`
-		Document DocumentRaw       `yaml:"document"`
-	}
-	var raw repoInstructionsRaw
-	if err := value.Decode(&raw); err != nil {
-		return err
-	}
-	for i := 0; i+1 < len(value.Content); i += 2 {
-		switch key := value.Content[i].Value; key {
-		case "review", "document":
-		default:
-			return fmt.Errorf("repo_instructions supports review and document only, not %q; operator configuration may add review and documentation guidance to a repository, never change what a pass requires of it", key)
-		}
-	}
-	r.Review = raw.Review
-	r.Document = raw.Document
-	return nil
 }
 
 // InstructionSource names where one block of review or documentation guidance
@@ -514,7 +479,7 @@ const (
 	// read from the trusted default branch (see EffectiveRepoConfig).
 	InstructionSourceRepository InstructionSource = "this repository's default branch (trusted)"
 	// InstructionSourceOperatorGlobal is ~/.no-mistakes/config.yaml's own
-	// review/document block, which applies to every gated repository.
+	// review block, which applies to every gated repository.
 	InstructionSourceOperatorGlobal InstructionSource = "operator configuration for every repository"
 	// InstructionSourceOperatorRepo is the repo_instructions entry for the
 	// repository under validation.
@@ -2449,11 +2414,7 @@ func LoadGlobalFromBytes(data []byte) (*GlobalConfig, error) {
 	if err := validateReviewPathInstructions("review.path_instructions", raw.Review.PathInstructions, MaxOperatorReviewPathInstructions, MaxOperatorReviewPathInstructionsBytes); err != nil {
 		return nil, err
 	}
-	if err := validateDocumentRaw("document.instructions", raw.Document); err != nil {
-		return nil, err
-	}
 	cfg.Review = raw.Review
-	cfg.Document = raw.Document
 	if raw.RepoInstructions != nil {
 		if err := ValidateRepoInstructions(raw.RepoInstructions); err != nil {
 			return nil, err
@@ -3371,8 +3332,8 @@ func (c *Config) AutoFixLimit(step types.StepName) int {
 }
 
 // Merge combines global and per-repo config for a caller that has no registered
-// repository in hand. It resolves the operator's global review and documentation
-// guidance but not the per-repository half, which needs a checkout path to
+// repository in hand. It resolves the operator's global review guidance
+// but not the per-repository half, which needs a checkout path to
 // select an entry; callers that know theirs use MergeForCheckout.
 func Merge(global *GlobalConfig, repo *RepoConfig) *Config {
 	return merge(global, repo, nil, "")
@@ -3537,7 +3498,6 @@ func merge(global *GlobalConfig, repo *RepoConfig, override *RepositoryOverride,
 		// requirements to a pass here, never remove one (see
 		// GlobalConfig.Review).
 		Document: Document{Instructions: resolveDocumentInstructions(
-			DocumentInstruction{Source: InstructionSourceOperatorGlobal, Text: global.Document.Instructions},
 			DocumentInstruction{Source: InstructionSourceOperatorRepo, Text: scoped.Document.Instructions},
 			DocumentInstruction{Source: InstructionSourceRepository, Text: repo.Document.Instructions},
 		)},
