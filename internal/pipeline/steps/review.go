@@ -25,6 +25,11 @@ type ReviewStep struct {
 func (s *ReviewStep) Name() types.StepName { return types.StepReview }
 
 func (s *ReviewStep) Execute(sctx *pipeline.StepContext) (*pipeline.StepOutcome, error) {
+	// Direct callers (including eval) must honor the same aggregate as the
+	// daemon resolver, before either a fix or a reviewer turn can launch.
+	if err := sctx.Config.ValidateReviewInstructions(); err != nil {
+		return nil, err
+	}
 	planSection, err := verificationPlanPromptSection(sctx)
 	if err != nil {
 		return nil, err

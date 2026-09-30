@@ -248,7 +248,10 @@ func (m *RunManager) loadRecoveredConfig(ctx context.Context, run *db.Run, repo 
 	effectiveRepoCfg := config.EffectiveRepoConfig(repoCfg, trustedRepoCfg, allowRepoCommands)
 	// Guidance follows the registered checkout, not the recovered run worktree;
 	// remote-keyed commit/title overrides still use the registered upstream.
-	cfg := config.MergeForRepository(globalCfg, effectiveRepoCfg, repo.UpstreamURL, repo.WorkingPath)
+	cfg, err := config.ResolveForRepository(globalCfg, effectiveRepoCfg, repo.UpstreamURL, repo.WorkingPath)
+	if err != nil {
+		return nil, err
+	}
 	// Gates are read back from the run, never re-resolved. Everything else here
 	// is deliberately re-read from the live default branch, but a gate decides
 	// which steps the run HAS: the default branch may have gained or lost one
@@ -1549,7 +1552,12 @@ func (m *RunManager) startRunWithIntentSourceLocked(ctx context.Context, repo *d
 		// This is not an error: it is the secure default in action.
 		slog.Info("repo commands/agent loaded from default branch, not pushed branch", "run_id", run.ID, "branch", branch, "default_branch", repo.DefaultBranch)
 	}
-	cfg := config.MergeForRepository(globalCfg, effectiveRepoCfg, repo.UpstreamURL, repo.WorkingPath)
+	cfg, err := config.ResolveForRepository(globalCfg, effectiveRepoCfg, repo.UpstreamURL, repo.WorkingPath)
+	if err != nil {
+		m.db.UpdateRunError(run.ID, err.Error())
+		trackStartFailure("review_instruction_budget")
+		return "", err
+	}
 	if run.PiProfile != nil {
 		if err := cfg.ValidatePiProfileAgents(); err != nil {
 			m.db.UpdateRunError(run.ID, err.Error())

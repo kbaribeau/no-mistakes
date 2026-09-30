@@ -484,10 +484,10 @@ The step log names the rules it applied and the rules that matched nothing, so a
 
 `instructions` is prompt text, so merge-conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) are removed from it and runs of whitespace are collapsed, exactly as for [`document.instructions`](#documentinstructions). Write rules without those tokens; a value that would be left empty once they are removed is rejected rather than silently dropped.
 
-At most 32 entries are allowed, and the assembled prompt section may not exceed 18,432 bytes, because the injected text shares the review prompt's budget and an oversized prompt fails the agent invocation outright.
+At most 32 entries are allowed. The original 16,384-byte prompt-section allowance is preserved, with additional room only for the longer provenance heading and the source-label line for each entry. This keeps previously valid repository-only guidance within budget without granting extra space for instruction prose.
 The size is measured on what is actually injected: the heading, and for every entry its labels, its `path`, its `instructions`, a 43-byte allowance for its source label, and a 192-byte allowance for its matched-file list. A block whose matched-file list would exceed that allowance is truncated with a `+N more` suffix, so the measured limit holds for any diff.
 
-This budget is for this file's entries alone. The operator-owned surfaces in the global config carry their own separate, smaller budgets, so a repository's own limit is never reduced by what an operator configured.
+The same aggregate ceiling applies when operator guidance is added: see the global reference's [shared budget](/no-mistakes/reference/global-config/#budget). A combination can be refused even when each source parses on its own. Refusal is explicit and happens before agent launch; instructions are never silently truncated.
 
 A missing `path` or `instructions` value, an `instructions` value that renders empty, a `path` that is not a valid glob, or a config over either limit fails when the config is parsed, so the run aborts before an agent starts instead of silently dropping guidance.
 These checks run on whichever copy of the file is parsed, including the pushed branch's. A pushed branch's blocks are ignored when the review prompt is built (see [Trust](#trust) below), but an invalid block on that branch still fails its own run, so a broken rule surfaces before it merges and becomes the trusted copy.

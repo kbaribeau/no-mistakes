@@ -544,49 +544,33 @@ const (
 // when the config is parsed - before a run starts - rather than truncated
 // silently at review time.
 const (
-	// MaxReviewPathInstructions is the largest number of path_instructions
-	// entries a repository may configure.
-	MaxReviewPathInstructions = 32
-	// MaxReviewPathInstructionsBytes is the largest review-prompt section
-	// path_instructions may produce, measured by ReviewPathInstructionsBytes.
-	// It leaves room for the entry cap to be reached with a rule of ordinary
-	// length, so neither cap makes the other unusable.
-	//
-	// The 2048 above the original 16384 is the provenance framing operator
-	// sources made necessary: a source line on every one of the 32 entries
-	// plus the longer heading. It is granted rather than taken out of the
-	// repository's share so that no .no-mistakes.yaml that was valid before
-	// this feature is rejected by it.
-	MaxReviewPathInstructionsBytes = 18432
-	// MaxOperatorReviewPathInstructions and
-	// MaxOperatorReviewPathInstructionsBytes bound EACH of the two operator
-	// sources - the global review block and the repo_instructions entry that
-	// matches the repository - independently, at parse time, exactly as the
-	// repository's own budget is bounded when its file is parsed.
-	//
-	// This is the per-source budget rather than a combined check, because the
-	// combined set only exists in Merge, which has no error path and no honest
-	// place to report a failure from (it runs after both files have already
-	// been accepted). Splitting the budget still bounds the assembled section
-	// statically: at most three sources can apply to one run - the repository,
-	// the operator's global block, and at most one repo_instructions entry,
-	// since the keys are canonicalized and duplicates are rejected - so the
-	// worst-case section is MaxReviewPathInstructionsBytes plus twice
-	// MaxOperatorReviewPathInstructionsBytes, and the entry count is bounded
-	// the same way. The operator's own share is smaller than the repository's
-	// because operator guidance supplements a repository rubric rather than
-	// replacing it.
-	//
-	// TODO(#1019): the alternative the issue names is a combined cap enforced
-	// over all three sources at once, which requires Merge to gain an error
-	// path (or a validating resolver ahead of it) so an over-budget
-	// COMBINATION can be reported instead of each source passing alone. That
-	// is a larger change to the shape of config resolution than this feature
-	// needs, and the maintainer has not ruled on it; it is the thing to build
-	// if the split budget proves too coarse.
+	// The shared aggregate preserves the original repository-only budget.
+	// Provenance gets only its measured framing allowance (see
+	// ReviewPathInstructionsBudgetBytes), not a second pool for more prose.
+	MaxReviewPathInstructions      = 32
+	MaxReviewPathInstructionsBytes = 16384
+	// Each operator source also has its own parse-time ceiling. Passing it
+	// does not guarantee that the combination fits: ResolveForRepository
+	// checks all selected sources before the daemon creates an agent.
 	MaxOperatorReviewPathInstructions      = 16
 	MaxOperatorReviewPathInstructionsBytes = 8192
+
+	// Compatibility reference, not a second prompt: the baseline's byte cap
+	// included this exact heading and no source lines.
+	legacyReviewPathInstructionsHeading = "Repository review instructions for the changed paths (trusted, from the default branch). Each block below applies only to the files listed under its path, and adds to the requirements above:"
 )
+
+// ReviewPathInstructionsBudgetBytes grants the original 16 KiB plus only the
+// extra provenance frame for this many entries. Both this allowance and the
+// section accounting charge the longest source label, so changing a source
+// cannot create or consume room for instruction text. No rules are truncated.
+func ReviewPathInstructionsBudgetBytes(entries []PathInstruction) int {
+	if len(entries) == 0 {
+		return MaxReviewPathInstructionsBytes
+	}
+	return MaxReviewPathInstructionsBytes + len(ReviewPathInstructionsHeading) - len(legacyReviewPathInstructionsHeading) +
+		len(entries)*(len(ReviewPathInstructionsSourceLabel)+ReviewPathInstructionsMaxSourceBytes+len("\n"))
+}
 
 // ReviewPathInstructionsBytes returns the largest review-prompt section these
 // entries can produce: the leading blank line, the heading, and for every entry
@@ -2713,14 +2697,14 @@ func validatePRRaw(pr PRRaw) error {
 // invalid block has to fail here, before it merges, rather than brick the
 // repository's pipeline afterwards. Do not scope this to the trusted copy.
 func validateReviewRaw(review ReviewRaw) error {
-	return validateReviewPathInstructions("review.path_instructions", review.PathInstructions, MaxReviewPathInstructions, MaxReviewPathInstructionsBytes)
+	return validateReviewPathInstructions("review.path_instructions", review.PathInstructions, MaxReviewPathInstructions, ReviewPathInstructionsBudgetBytes(review.PathInstructions))
 }
 
 // validateReviewPathInstructions is the shared per-source check. label names the
 // configuration key in every message, because the same list can now arrive from
 // three files and an error that does not say which one is not actionable. Each
-// source is measured against its own budget; see MaxReviewPathInstructionsBytes
-// for why the combined set is bounded by construction rather than by a check.
+// source is measured at parse time; the resolved combination is checked again
+// by ValidateReviewInstructions before use.
 func validateReviewPathInstructions(label string, entries []PathInstruction, maxEntries, maxBytes int) error {
 	if len(entries) > maxEntries {
 		return fmt.Errorf("%s has %d entries, at most %d are allowed", label, len(entries), maxEntries)
@@ -2759,12 +2743,20 @@ func validateDocumentRaw(label string, document DocumentRaw) error {
 	return nil
 }
 
+// ValidateReviewInstructions refuses the complete selected set, before path
+// matching or deduplication. Even currently-unmatched rules must fit: a later
+// fix can change more paths. Report overflow, never truncate obligations.
+func (c *Config) ValidateReviewInstructions() error {
+	return validateReviewPathInstructions("combined review.path_instructions (global + checkout + trusted repository)", c.Review.PathInstructions,
+		MaxReviewPathInstructions, ReviewPathInstructionsBudgetBytes(c.Review.PathInstructions))
+}
+
 // ValidateRepoInstructions checks a repo_instructions map before any run reads
 // it. Keys follow worktree_roots exactly - an absolute registered checkout path,
 // canonicalized so two spellings of one checkout cannot both be present. The
 // duplicate rejection is what makes "at most one repo_instructions entry applies
-// to a run" a fact rather than a hope, which is what bounds the assembled review
-// section (see MaxReviewPathInstructionsBytes).
+// to a run" a fact rather than a hope. The selected combination also has a
+// shared budget (see ValidateReviewInstructions).
 //
 // A relative key is rejected for the reason worktree_roots rejects a relative
 // value: the daemon that resolves it has an unrelated working directory, so the
@@ -3349,6 +3341,17 @@ func MergeForRemote(global *GlobalConfig, repo *RepoConfig, remote string) *Conf
 // no remote identity is available. Daemon callers use MergeForRepository.
 func MergeForCheckout(global *GlobalConfig, repo *RepoConfig, checkout string) *Config {
 	return merge(global, repo, nil, checkout)
+}
+
+// ResolveForRepository is the error-returning run resolver. Unlike Merge,
+// which also serves non-executing config queries, it refuses over-budget
+// combinations before any pipeline agent can launch.
+func ResolveForRepository(global *GlobalConfig, repo *RepoConfig, remote, checkout string) (*Config, error) {
+	cfg := MergeForRepository(global, repo, remote, checkout)
+	if err := cfg.ValidateReviewInstructions(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 // MergeForRepository retains remote-keyed commit/title overrides alongside

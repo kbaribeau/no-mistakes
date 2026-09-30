@@ -754,7 +754,7 @@ This is the same guidance held on your machine instead of in the repository, for
 
 Entries here apply to **every** gated repository. Guidance true of one repository belongs in [`repo_instructions`](#repo_instructions): applying one application's domain rules while reviewing a sibling application is worse than applying none, because a confidently wrong finding costs more attention than a missing one.
 
-At most 16 entries are allowed, and they may not exceed 8,192 bytes measured the way the repository field is measured. That budget is separate from the repository's own and from `repo_instructions`', so no source reduces another's; see [Budget](#budget) below.
+Each operator source allows at most 16 entries and 8,192 accounted bytes. The selected sources must also fit the shared [Budget](#budget); individually valid files can form an over-budget combination.
 
 ### repo_instructions
 
@@ -800,9 +800,9 @@ Duplicate review rules (same `path` **and** same `instructions`) are injected on
 
 #### Budget
 
-Each source is measured against its own budget when its file is parsed, so an over-budget rule fails before a run starts rather than failing an agent invocation at review time.
-The repository keeps its full 18,432 bytes and 32 entries; the global block and the matching `repo_instructions` entry get 8,192 bytes and 16 entries each.
-At most one `repo_instructions` entry can apply to a run, so the assembled review section is bounded by the sum of the three.
+The combined global → selected checkout → trusted repository set may contain at most **32 entries**, before path matching or deduplication. Its byte allowance is the original repository-only **16,384-byte budget**, plus only the extra heading and per-entry source-label framing. The accounting reserves the longest source label and the full bounded matched-file list, not model tokens. Previously valid repository-only guidance keeps its room; operator sources share that room rather than each adding another budget to the total.
+
+Each operator source also has a 16-entry, 8,192-byte parse-time ceiling. The run resolver checks the complete combination before creating an agent, including on recovery. For example, 20 repository + 8 global + 8 checkout rules are individually valid but the 36-entry combination is refused. Shorten the selected guidance; no obligations are silently truncated. Only the selected checkout counts, and currently unmatched rules still count because later fixes can change more paths.
 
 #### Key matching
 

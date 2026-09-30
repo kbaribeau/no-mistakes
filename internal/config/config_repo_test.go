@@ -544,10 +544,11 @@ func TestParseRepoConfig_ReviewPathInstructionsAtCapsIsValid(t *testing.T) {
 	// Size one entry so the accounted section lands exactly on the cap.
 	path := "internal/**"
 	frame := ReviewPathInstructionsBytes([]PathInstruction{{Path: path, Instructions: ""}})
-	body := strings.Repeat("x", MaxReviewPathInstructionsBytes-frame)
+	budget := ReviewPathInstructionsBudgetBytes([]PathInstruction{{Path: path}})
+	body := strings.Repeat("x", budget-frame)
 	entries := []PathInstruction{{Path: path, Instructions: body}}
-	if got := ReviewPathInstructionsBytes(entries); got != MaxReviewPathInstructionsBytes {
-		t.Fatalf("accounted bytes = %d, want exactly the cap %d", got, MaxReviewPathInstructionsBytes)
+	if got := ReviewPathInstructionsBytes(entries); got != budget {
+		t.Fatalf("accounted bytes = %d, want exactly the cap %d", got, budget)
 	}
 	yamlFor := func(instructions string) []byte {
 		return []byte("review:\n  path_instructions:\n    - path: \"" + path + "\"\n      instructions: \"" + instructions + "\"\n")
