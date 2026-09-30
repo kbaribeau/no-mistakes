@@ -46,8 +46,12 @@ func TestMergeLeavesEvalProvenanceDisabledUntilExplicitlyEnabled(t *testing.T) {
 	if err := cfg.EnableEvalProvenance(global, repo); err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.CaptureEvalProvenance || string(cfg.ReplayGlobalYAML) != "agent: claude\n" || len(cfg.ReplayRepoYAML) == 0 {
+	if !cfg.CaptureEvalProvenance || len(cfg.ReplayGlobalYAML) == 0 || len(cfg.ReplayRepoYAML) == 0 {
 		t.Fatalf("enabled eval provenance = %#v", cfg)
+	}
+	replayed, err := LoadEvalConfig(cfg.ReplayGlobalYAML, cfg.ReplayRepoYAML)
+	if err != nil || replayed.Agent != types.AgentClaude || len(replayed.IgnorePatterns) != 1 {
+		t.Fatalf("enabled provenance did not round-trip: cfg=%+v err=%v", replayed, err)
 	}
 }
 

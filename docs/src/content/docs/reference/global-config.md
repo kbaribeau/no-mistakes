@@ -809,7 +809,7 @@ Each operator source also has a 16-entry, 8,192-byte parse-time ceiling. The run
 The key is matched against the checkout path recorded at `init`, canonicalized, exactly like [`worktree_roots`](#worktree_roots): a relative key is rejected at load time, two spellings of one checkout are rejected, and a key that matches no registered repository is reported in the daemon log at startup and otherwise does nothing.
 After moving a checkout, re-run `no-mistakes init` from the new path and update the key.
 
-New runs read the current global config without requiring a daemon restart. An uninterrupted run retains its loaded guidance. Recovery after interruption reads the current operator config again, so edits may change a recovered run's guidance. These instructions are not immutable per-run pins; existing gate and Pi pins keep their separate contracts.
+New runs read the current global config without requiring a daemon restart. An uninterrupted run retains its loaded guidance. Recovery after interruption reads the current operator config again, so edits may change a recovered run's guidance. These instructions are not immutable per-run pins; existing gate and Pi pins keep their separate contracts. [Eval provenance](/no-mistakes/reference/eval/) separately records the selected historical guidance for later replay; it does not change these recovery semantics.
 
 ### auto_fix
 

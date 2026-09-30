@@ -197,7 +197,7 @@ func Capture(ctx context.Context, store *Store, p *paths.Paths, database *db.DB,
 		}
 		startingSHA := strings.TrimSpace(*round.StartingHeadSHA)
 		trustedSHA := strings.TrimSpace(*round.TrustedConfigSHA)
-		globalConfig, err := agentNeutralGlobalConfig(round.GlobalConfigYAML)
+		globalConfig, err := agentNeutralGlobalConfig(round.GlobalConfigYAML, round.RepoConfigYAML)
 		if err != nil {
 			return nil, fmt.Errorf("read review round %q global configuration: %w", round.ID, err)
 		}
@@ -307,9 +307,10 @@ func repoConfigAt(ctx context.Context, gateDir, sha string) (*config.RepoConfig,
 	return config.LoadRepoFromBytes([]byte(content))
 }
 
-func agentNeutralGlobalConfig(data []byte) ([]byte, error) {
-	if _, err := config.LoadGlobalFromBytes(data); err != nil {
-		return nil, fmt.Errorf("read pinned global config for capture: %w", err)
+func agentNeutralGlobalConfig(data, repoData []byte) ([]byte, error) {
+	data, err := config.PrepareEvalGlobal(data, repoData)
+	if err != nil {
+		return nil, fmt.Errorf("read pinned guidance for capture: %w", err)
 	}
 	var raw map[string]any
 	if err := yaml.Unmarshal(data, &raw); err != nil {
@@ -325,14 +326,9 @@ func agentNeutralGlobalConfig(data []byte) ([]byte, error) {
 	delete(raw, "agent_args_override")
 	delete(raw, "agent_config")
 	delete(raw, "review_agents")
-	// repo_instructions is keyed by an absolute checkout path on the capturing
-	// machine, and a case carries no checkout for a replay to match it against,
-	// so an entry kept here would be configuration that silently does nothing.
-	// The global review/document blocks beside it are portable and stay: they
-	// apply to every gated repository, so a replay resolves them exactly as the
-	// captured run did. Preserving the scoped half faithfully would mean
-	// recording the checkout in round provenance.
-	delete(raw, "repo_instructions")
+	// PrepareEvalGlobal has kept the selected source-labelled guidance, never
+	// the unrelated checkout map. Do not strip that snapshot with the agent
+	// knobs: it is the historical rubric the candidate must actually see.
 	out, err := yaml.Marshal(raw)
 	if err != nil {
 		return nil, fmt.Errorf("serialize agent-neutral global config: %w", err)

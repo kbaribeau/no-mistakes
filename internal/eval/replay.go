@@ -468,19 +468,15 @@ func restoreCase(ctx context.Context, store *Store, c Case, root string) (string
 }
 
 func replayConfig(c Case) (*config.Config, error) {
-	global, err := config.LoadGlobal(filepath.Join(c.Dir, "config", "global.yaml"))
+	globalBytes, err := os.ReadFile(filepath.Join(c.Dir, "config", "global.yaml"))
 	if err != nil {
-		return nil, fmt.Errorf("load captured global config: %w", err)
+		return nil, fmt.Errorf("read captured global config: %w", err)
 	}
 	repoBytes, err := os.ReadFile(filepath.Join(c.Dir, "config", "repo-config.yaml"))
 	if err != nil {
 		return nil, fmt.Errorf("read captured repo config: %w", err)
 	}
-	repo, err := config.LoadRepoFromBytes(repoBytes)
-	if err != nil {
-		return nil, fmt.Errorf("load captured repo config: %w", err)
-	}
-	return config.Merge(global, repo), nil
+	return config.LoadEvalConfig(globalBytes, repoBytes)
 }
 
 type observedAgent struct {

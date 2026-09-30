@@ -3531,21 +3531,3 @@ func merge(global *GlobalConfig, repo *RepoConfig, override *RepositoryOverride,
 
 	return cfg
 }
-
-// EnableEvalProvenance pins the exact configuration this run reviews under so
-// a later replay grades a candidate against identical conditions. The caller
-// decides whether to call it (see Eval.CaptureProvenance); this is the single
-// owner of what "exact provenance" contains.
-func (c *Config) EnableEvalProvenance(global *GlobalConfig, repo *RepoConfig) error {
-	if c == nil || global == nil || repo == nil {
-		return fmt.Errorf("eval provenance requires merged, global, and repository configuration")
-	}
-	repoYAML, err := yaml.Marshal(repo)
-	if err != nil {
-		return fmt.Errorf("serialize eval repository configuration: %w", err)
-	}
-	c.ReplayGlobalYAML = append([]byte(nil), global.SourceYAML...)
-	c.ReplayRepoYAML = repoYAML
-	c.CaptureEvalProvenance = true
-	return nil
-}

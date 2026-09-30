@@ -49,12 +49,17 @@ A run is skipped when there is nothing honest to freeze: no Review step, no fini
 A case includes:
 
 - the reviewed commit, base, and trusted-config commit pinned at capture
-- agent-neutral global configuration and the effective repository configuration frozen at capture
+- agent-neutral global configuration and effective repository configuration recorded with the review round, then copied at capture
+- an explicit snapshot of the selected review/document guidance, in order with source labels, without unrelated checkout-guidance entries or the checkout path used to select them
 - the original run, step, review-round, decision, and local invocation-metric records
 - a manifest with commit pins, changed-file counts, build identity, and a hash of the redacted remote URL
 - a local `labels.json` file that stores finding-level gold; queued unmatched candidate findings are counted from the recorded replays themselves, so replays never rewrite a case's labels
 
 The manifest never stores a remote URL. Capture is read-only against the existing local database and gate. It does not fetch from the network.
+
+Selected guidance is stored in the existing round configuration provenance, not in an immutable live-run pin. An uninterrupted executor keeps its loaded rules; a recovered executor may reread updated operator config, but its new rounds do not rewrite earlier rounds' snapshots. Replay uses the recorded selection, never today's config or the replay worktree path. The internal snapshot metadata is not an accepted global-config setting.
+
+Legacy **rounds** with no checkout-guidance map can be captured from their unambiguous historical global/repository inputs. A legacy round containing an unbound map is refused; capture cannot guess which entry applied. Already-exported **cases** without a selected-guidance snapshot are also refused for replay, because the old exporter may have removed a nonempty map. Existing cases and labels are not migrated or rewritten by recapture. Capture a new review with explicit provenance instead; missing, malformed or unknown-version snapshots never silently replay with fewer rules.
 
 ## Finding-level gold
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -335,7 +336,7 @@ func TestReplayPinsCandidateModelAndEffortOnTheHarness(t *testing.T) {
 func TestCaptureStripsEveryHarnessPinFromThePinnedConfig(t *testing.T) {
 	pinned := []byte("agent: codex\nagent_args_override:\n  codex:\n    - -m\n    - gpt-5.4\nagent_config:\n  codex:\n    model: gpt-5.4\n    effort: high\nlog_level: warn\n")
 	pinned = append(pinned, []byte("review_agents:\n  reviewer: {agent: pi, model: review-model, effort: max}\n  fixer: {agent: pi, model: fix-model, effort: high}\n")...)
-	neutral, err := agentNeutralGlobalConfig(pinned)
+	neutral, err := agentNeutralGlobalConfig(pinned, []byte("{}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +348,7 @@ func TestCaptureStripsEveryHarnessPinFromThePinnedConfig(t *testing.T) {
 	if !strings.Contains(string(neutral), "log_level") {
 		t.Errorf("pinned config lost unrelated settings: %s", neutral)
 	}
-	cfg, err := config.LoadGlobalFromBytes(neutral)
+	cfg, err := config.LoadEvalConfig(neutral, []byte("{}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1037,36 +1038,12 @@ func installFakeReviewAgent(t *testing.T, p *paths.Paths, findingsJSON string) {
 	t.Setenv("PATH", filepath.Dir(fake)+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// A captured case carries no checkout path, so a path-keyed repo_instructions
-// entry could never be matched at replay. It is dropped rather than stored as
-// configuration that silently does nothing, while the operator's global review
-// guidance - which applies to every repository, and which the
-// captured run's reviewer did see - is preserved.
-func TestCaptureDropsPathKeyedRepoInstructionsButKeepsGlobalGuidance(t *testing.T) {
-	pinned := []byte("log_level: warn\n" +
-		"review:\n  path_instructions:\n    - path: \"internal/**\"\n      instructions: operator rule\n" +
-		"repo_instructions:\n  /some/other/machine/checkout:\n    document:\n      instructions: scoped policy\n")
-
-	neutral, err := agentNeutralGlobalConfig(pinned)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(neutral), "repo_instructions") {
-		t.Errorf("captured config still carries a path-keyed entry no replay can match: %s", neutral)
-	}
-
-	cfg, err := config.LoadGlobalFromBytes(neutral)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(cfg.RepoInstructions) != 0 {
-		t.Errorf("neutral config resolves scoped instructions: %#v", cfg.RepoInstructions)
-	}
-	resolved := config.Merge(cfg, &config.RepoConfig{})
-	if len(resolved.Review.PathInstructions) != 1 || resolved.Review.PathInstructions[0].Path != "internal/**" {
-		t.Errorf("replay lost the operator's global review guidance: %#v", resolved.Review.PathInstructions)
-	}
-	if len(resolved.Document.Instructions) != 0 {
-		t.Errorf("replay unexpectedly received global document guidance: %#v", resolved.Document.Instructions)
+// An old round with an unbound checkout map is not a faithful replay input.
+// Refuse it rather than letting a passing capture test certify lost guidance.
+func TestCaptureRefusesLegacyUnselectedCheckoutGuidance(t *testing.T) {
+	checkout := filepath.Join(t.TempDir(), "checkout")
+	pinned := []byte(fmt.Sprintf("repo_instructions:\n  %q:\n    document:\n      instructions: scoped policy\n", checkout))
+	if _, err := agentNeutralGlobalConfig(pinned, []byte("{}\n")); err == nil || !strings.Contains(err.Error(), "cannot reconstruct selected checkout guidance") {
+		t.Fatalf("legacy map was silently stripped: %v", err)
 	}
 }
