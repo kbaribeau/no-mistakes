@@ -44,12 +44,21 @@ func TestAxiRunIntentRejectsInputBeforeOpeningResources(t *testing.T) {
 	empty := writeIntentFile(t, "")
 	blank := writeIntentFile(t, " \t\r\n\u2003")
 	missing := filepath.Join(t.TempDir(), "missing")
+	invalid := "goal\xff"
+	large := strings.Repeat("x", 49123)
 	for _, tc := range []struct {
 		name  string
 		args  []string
 		stdin io.Reader
 		want  string
 	}{
+		{"string invalid UTF-8", []string{"--intent", invalid}, nil, "must be valid UTF-8"},
+		{"file invalid UTF-8", []string{"--intent-file", writeIntentFile(t, invalid)}, nil, "must be valid UTF-8"},
+		{"stdin invalid UTF-8", []string{"--intent=-"}, strings.NewReader(invalid), "must be valid UTF-8"},
+		{"string oversized", []string{"--intent", large}, nil, "exceeds the 49122-byte"},
+		{"file oversized", []string{"--intent-file", writeIntentFile(t, large)}, nil, "exceeds the 49122-byte"},
+		{"stdin oversized", []string{"--intent=-"}, strings.NewReader(large), "exceeds the 49122-byte"},
+		{"file device", []string{"--intent-file", os.DevNull}, nil, "regular file"},
 		{"string empty", []string{"--intent="}, nil, "--intent must not be empty"},
 		{"string whitespace", []string{"--intent", " \n\u2003"}, nil, "--intent must not be empty"},
 		{"file empty path", []string{"--intent-file="}, nil, "--intent-file requires a file path"},
@@ -326,5 +335,86 @@ func TestNoMistakesBinary_IntentTransport(t *testing.T) {
 		if len(requests) != 0 || cliGit(t, gateDir, "show-ref") != before || cliGit(t, local, "rev-parse", "HEAD") != head {
 			t.Fatalf("invalid input mutated run/custody state: %q", args)
 		}
+	}
+}
+
+// This producer never sends EOF. It reports an error after the permitted probe
+// byte so an unbounded implementation fails deterministically without an OOM.
+type intentProducingReader struct{ bytes int }
+
+func (r *intentProducingReader) Read(p []byte) (int, error) {
+	if r.bytes >= 49123 {
+		return 0, errors.New("read beyond limit probe")
+	}
+	n := min(len(p), 49123-r.bytes)
+	for i := range p[:n] {
+		p[i] = 'x'
+	}
+	r.bytes += n
+	return n, nil
+}
+
+func TestAxiRunIntentBoundsProducingStdin(t *testing.T) {
+	cmd := newAxiRunCmd()
+	if err := cmd.ParseFlags([]string{"--intent=-"}); err != nil {
+		t.Fatal(err)
+	}
+	r := &intentProducingReader{}
+	cmd.SetIn(r)
+	got, err := resolveAxiRunIntent(cmd, "-", "")
+	if err == nil || !strings.Contains(err.Error(), "exceeds the 49122-byte") || got != "" || r.bytes != 49123 {
+		t.Fatalf("got %d bytes, error %v, consumed %d", len(got), err, r.bytes)
+	}
+}
+
+func TestAxiRunIntentAcceptsBoundaryThroughEOF(t *testing.T) {
+	// Include JSON-escaped text and multibyte UTF-8, including the real
+	// replacement character (valid UTF-8, unlike a malformed byte sequence).
+	text := strings.Repeat("\x00", 49122-len("雪�\n")) + "雪�\n"
+	for _, transport := range []string{"string", "file", "stdin"} {
+		t.Run(transport, func(t *testing.T) {
+			cmd := newAxiRunCmd()
+			intent, path := text, ""
+			args := []string{"--intent", text}
+			if transport == "file" {
+				path = writeIntentFile(t, text)
+				args = []string{"--intent-file", path}
+			} else if transport == "stdin" {
+				intent = "-"
+				args = []string{"--intent=-"}
+				r, w := io.Pipe()
+				defer r.Close()
+				cmd.SetIn(r)
+				go func() {
+					// Split a UTF-8 sequence across writes. Only the complete
+					// input should be validated, after EOF.
+					_, err := io.WriteString(w, text[:len(text)-2])
+					if err == nil {
+						_, err = io.WriteString(w, text[len(text)-2:])
+					}
+					w.CloseWithError(err)
+				}()
+			}
+			if err := cmd.ParseFlags(args); err != nil {
+				t.Fatal(err)
+			}
+			got, err := resolveAxiRunIntent(cmd, intent, path)
+			if err != nil || got != text {
+				t.Fatalf("got %d bytes, error %v; want original %d bytes", len(got), err, len(text))
+			}
+			// The serialized push-option contract is bounded by Git's
+			// packet payload; one extra input byte must exceed that payload.
+			if len(formatIntentPushOption(got)) > 65516 || len(formatIntentPushOption(got+"x")) <= 65516 {
+				t.Fatal("intent boundary does not match the Git packet payload")
+			}
+			wire, err := json.Marshal(ipc.RerunParams{Intent: got})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var received ipc.RerunParams
+			if err := json.Unmarshal(wire, &received); err != nil || digestLaunchIntent(got) != digestLaunchIntent(received.Intent) {
+				t.Fatalf("JSON transport changed receipt bytes: %v", err)
+			}
+		})
 	}
 }
