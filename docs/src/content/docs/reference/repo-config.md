@@ -409,7 +409,7 @@ It augments or clarifies the built-in policy; it cannot disable documentation in
 
 Like `commands.*` and `agent`, this field steers gate behavior, so it is honored **only from the trusted default-branch copy** of `.no-mistakes.yaml`: a contributor's pushed branch cannot weaken the documentation rules that gate its own review.
 
-The document step states the source of every policy block it receives, so this repository's policy and an operator's ([`repo_instructions`](/no-mistakes/reference/global-config/#repo_instructions) in the global config) are told apart rather than merged into one anonymous rule.
+The document step states the source of every policy block it receives, so this repository's policy and an operator's ([`repo_instructions`](/no-mistakes/reference/global-config/#repo_instructions) in the global config) are told apart rather than merged into one anonymous rule. Operator guidance is supplemental, not an override; the [conflict contract](/no-mistakes/reference/global-config/#scope-additive-guidance-only) asks the agent to surface irreconcilable requirements for a decision.
 
 ### review.conversation
 
@@ -466,7 +466,7 @@ instructions:
 Prose changes only. Do not request test coverage.
 ```
 
-The same guidance can also come from your own machine, for a repository you cannot commit this file to: see [`review.path_instructions`](/no-mistakes/reference/global-config/#reviewpath_instructions) and [`repo_instructions`](/no-mistakes/reference/global-config/#repo_instructions) in the global config.
+The same guidance can also come from your own machine, for a repository you cannot commit this file to: see [`review.path_instructions`](/no-mistakes/reference/global-config/#reviewpath_instructions) and [`repo_instructions`](/no-mistakes/reference/global-config/#repo_instructions) in the global config. These additions cannot override repository requirements; [irreconcilable conflicts](/no-mistakes/reference/global-config/#scope-additive-guidance-only) are for a decision, not silent source-order precedence.
 
 #### Matching
 

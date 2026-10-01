@@ -786,7 +786,9 @@ Review guidance uses the same matching rules as the global review block. Documen
 
 These two fields are the whole `repo_instructions` surface. `commands`, `agent`, `no_ci`, `allow_repo_commands`, `pr.base_branch`, `disable_project_settings`, and `ignore_patterns` are **not** available inside an entry. Unknown fields, including nested typos such as `document.instruction`, are load-time errors. This restriction does not remove supported top-level global settings such as [`agent`](#agent).
 
-Guidance is appended, never substituted for repository-owned rules. It does not enable executable commands or change the trusted repository configuration boundary. Prose asks the agent to apply additional guidance; concatenation alone cannot mechanically prove that arbitrary instructions only strengthen validation.
+Guidance is supplemental: it must not override repository requirements or weaken built-in rules. It is appended, never substituted, and does not enable executable commands or change the trusted repository configuration boundary.
+
+Review and Document prompts ask the agent to apply all compatible requirements. If applicable requirements cannot be reconciled, the agent must return a `warning` finding with action `ask-user`, naming the conflicting requirements, their sources, and the decision needed, rather than silently choosing one, dropping either, or making edits that depend on that decision. Documentation conflicts remain documentation findings in a combined document+lint pass. This uses the existing finding/approval flow; it does not require `review.conversation` or introduce a new gate. These are prompt instructions, not a semantic contradiction detector or a guarantee of model compliance. Ordinary gate decisions, including automated driving modes, retain their existing semantics.
 
 #### Provenance
 
@@ -795,7 +797,7 @@ Every block reaches the agent labelled with the configuration it came from - `th
 #### Merge order
 
 All three sources apply; none replaces another. A repository that configures nothing still gets yours, which is the point.
-Blocks are ordered from the widest scope to the narrowest - global, then `repo_instructions`, then the repository's own trusted copy - so the repository's own rubric reads last.
+Blocks are ordered from the widest scope to the narrowest - global, then `repo_instructions`, then the repository's own trusted copy - so the repository's own rubric reads last. That presentation order is not last-writer-wins precedence; conflicts follow the [supplemental-guidance contract](#scope-additive-guidance-only).
 Duplicate review rules (same `path` **and** same `instructions`) are injected once regardless of source.
 
 #### Budget

@@ -19,6 +19,14 @@ type DocumentStep struct{}
 
 func (s *DocumentStep) Name() types.StepName { return types.StepDocument }
 
+// supplementalGuidanceRule is shared by Review and Document. It asks for an
+// ordinary decision finding, not semantic conflict detection or a new gate.
+const supplementalGuidanceRule = `
+
+Supplemental guidance:
+- Operator guidance supplements repository requirements; it must not override them or weaken the built-in rules. Apply all compatible requirements, regardless of source order; order is not last-writer-wins.
+- If applicable requirements cannot be reconciled, return a finding with severity "warning" and action "ask-user", naming the conflicting requirements, their sources, and the decision needed. Do not silently choose one or drop either requirement, and do not make edits that depend on resolving the conflict before that decision.`
+
 // documentPlacementPolicy is the fail-safe default placement policy. It
 // replaces the old exhaustive-synchronization incentive: the agent is
 // rewarded for updating each fact's single owner and for consolidation,
@@ -294,7 +302,8 @@ func trustedDocumentPolicySection(sctx *pipeline.StepContext) string {
 		return ""
 	}
 	return "\n\nDocumentation ownership policy (trusted; augments the defaults above and cannot weaken them). Each block states the configuration it came from:\n" +
-		strings.Join(rendered, "\n\n")
+		strings.Join(rendered, "\n\n") + supplementalGuidanceRule +
+		"\nFor documentation guidance conflicts, set the finding category to \"documentation\", including in a combined document+lint pass."
 }
 
 func lintDutySection(combinedLint bool) string {

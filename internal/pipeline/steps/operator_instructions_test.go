@@ -8,6 +8,8 @@ import (
 
 	"github.com/kunchenguid/no-mistakes/internal/agent"
 	"github.com/kunchenguid/no-mistakes/internal/config"
+	"github.com/kunchenguid/no-mistakes/internal/pipeline"
+	"github.com/kunchenguid/no-mistakes/internal/types"
 )
 
 // Operator guidance reaches the reviewer, and every block names the
@@ -73,9 +75,93 @@ func TestReviewStep_OperatorInstructionsReachTheReviewPrompt(t *testing.T) {
 	want := strings.TrimSuffix(unconfigured, agent.MemoryFilesRule) + wantSection(
 		wantBlockFrom(config.InstructionSourceOperatorGlobal, "*.txt", "feature.txt", "Fixture files carry no product behavior."),
 		wantBlockFrom(config.InstructionSourceOperatorRepo, "feature.txt", "feature.txt", "This repository's fixtures are shared."),
-	) + agent.MemoryFilesRule
+	) + supplementalGuidanceRule + agent.MemoryFilesRule
 	if prompt != want {
 		t.Fatalf("review prompt =\n%q\nwant\n%q", prompt, want)
+	}
+}
+
+// This is a prompt/consumer contract test, not proof a model detects conflicts.
+// Keep both incompatible requirements and route a reported conflict through the
+// existing decision flow, even with the opt-in review conversation disabled.
+func TestOperatorGuidance_ConflictsUseExistingDecisionFindings(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"review", "document", "housekeeping"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			dir, baseSHA, headSHA := setupGitRepo(t)
+			ag := &mockAgent{name: "test", runFn: func(context.Context, agent.RunOpts) (*agent.Result, error) {
+				return &agent.Result{Output: json.RawMessage(`{"findings":[{"severity":"warning","action":"ask-user","category":"documentation","description":"Operator requires README as the owner; repository requires docs/config.md. Decide the owner before editing."}],"reviewed_paths":["feature.txt"],"summary":"guidance needs a decision","risk_level":"medium"}`)}, nil
+			}}
+			cmds := config.Commands{}
+			if mode == "document" {
+				cmds.Lint = "true"
+			}
+			sctx := newHousekeepingContext(t, ag, dir, baseSHA, headSHA, cmds)
+			operator := "README.md must own configuration facts."
+			repository := "docs/config.md must own configuration facts, never README.md."
+			sctx.Config.Review = config.Review{PathInstructions: []config.PathInstruction{
+				{Path: "*.txt", Instructions: operator, Source: config.InstructionSourceOperatorGlobal},
+				{Path: "*.txt", Instructions: repository, Source: config.InstructionSourceRepository},
+			}}
+			sctx.Config.Document.Instructions = []config.DocumentInstruction{
+				{Text: operator, Source: config.InstructionSourceOperatorRepo},
+				{Text: repository, Source: config.InstructionSourceRepository},
+			}
+			var step pipeline.Step = &DocumentStep{}
+			if mode == "review" {
+				step = &ReviewStep{}
+			}
+			out, err := step.Execute(sctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(ag.calls) != 1 {
+				t.Fatalf("wanted one agent call, got %d", len(ag.calls))
+			}
+			prompt := ag.calls[0].Prompt
+			for _, want := range []string{
+				operator, repository,
+				"Operator guidance supplements repository requirements; it must not override them",
+				"Apply all compatible requirements, regardless of source order; order is not last-writer-wins",
+				`severity "warning" and action "ask-user"`,
+				"naming the conflicting requirements, their sources, and the decision needed",
+				"Do not silently choose one or drop either requirement",
+				"do not make edits that depend on resolving the conflict before that decision",
+				"source: " + string(config.InstructionSourceRepository),
+			} {
+				if !strings.Contains(prompt, want) {
+					t.Errorf("prompt lost %q", want)
+				}
+			}
+			operatorSource := config.InstructionSourceOperatorRepo
+			if mode == "review" {
+				operatorSource = config.InstructionSourceOperatorGlobal
+			}
+			if !strings.Contains(prompt, "source: "+string(operatorSource)) {
+				t.Fatal("operator source lost")
+			}
+			findings, err := types.ParseFindingsJSON(out.Findings)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !out.NeedsApproval || !types.HasAskUserFindings(findings) || len(findings.Items) != 1 {
+				t.Fatalf("reported conflict did not reach the decision gate: %+v", out)
+			}
+			if mode == "housekeeping" {
+				if !strings.Contains(prompt, `set the finding category to "documentation"`) {
+					t.Fatal("combined pass must keep the conflict at the documentation gate")
+				}
+				stash, ok := sctx.Shared.TakeHousekeepingLint()
+				if !ok {
+					t.Fatal("combined lint duty lost")
+				}
+				lint, err := types.ParseFindingsJSON(stash.FindingsJSON)
+				if err != nil || len(lint.Items) != 0 {
+					t.Fatalf("documentation conflict leaked into lint: %s (%v)", stash.FindingsJSON, err)
+				}
+			}
+		})
 	}
 }
 

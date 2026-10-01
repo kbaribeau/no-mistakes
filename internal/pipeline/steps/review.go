@@ -271,6 +271,10 @@ Previous review findings to address:
 	pathInstructionMatches := matchPathInstructions(changed, sctx.Config.Review.PathInstructions)
 	logPathInstructions(sctx.Log, pathInstructionMatches)
 	pathInstructions := reviewPathInstructionsSection(pathInstructionMatches)
+	if pathInstructions != "" {
+		// Fixed task discipline, separate from the budgeted configuration text.
+		pathInstructions += supplementalGuidanceRule
+	}
 
 	// The authorization/privacy obligation below specializes the existing
 	// concrete-state trace only when changed behavior crosses a potentially

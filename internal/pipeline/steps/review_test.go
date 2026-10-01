@@ -1529,7 +1529,7 @@ func TestReviewStep_PathInstructionsLeaveUnconfiguredPromptUnchanged(t *testing.
 	// The memory-file edit-scope rule always trails the prompt, so the matched
 	// prompt is the unconfigured one with the path section inserted before it.
 	base := strings.TrimSuffix(unconfigured, agent.MemoryFilesRule)
-	want := base + wantSection(wantBlock("*.txt", "feature.txt", "Fixture files carry no product behavior.")) + agent.MemoryFilesRule
+	want := base + wantSection(wantBlock("*.txt", "feature.txt", "Fixture files carry no product behavior.")) + supplementalGuidanceRule + agent.MemoryFilesRule
 	if matched != want {
 		t.Fatalf("matched review prompt = %q, want the unconfigured prompt plus the appended section", matched)
 	}
@@ -1553,7 +1553,7 @@ func TestReviewStep_AppendsMatchedPathInstructionsOnly(t *testing.T) {
 	want := base + wantSection(
 		wantBlock("feature.txt", "feature.txt", "Fixture files carry no product behavior."),
 		wantBlock("*.txt", "feature.txt", "Every fixture edit needs a reason."),
-	) + agent.MemoryFilesRule
+	) + supplementalGuidanceRule + agent.MemoryFilesRule
 	if prompt != want {
 		t.Fatalf("review prompt =\n%q\nwant\n%q", prompt, want)
 	}
