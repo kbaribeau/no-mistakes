@@ -91,7 +91,7 @@ func TestOperatorGuidance_ConflictsUseExistingDecisionFindings(t *testing.T) {
 			t.Parallel()
 			dir, baseSHA, headSHA := setupGitRepo(t)
 			ag := &mockAgent{name: "test", runFn: func(context.Context, agent.RunOpts) (*agent.Result, error) {
-				return &agent.Result{Output: json.RawMessage(`{"findings":[{"severity":"warning","action":"ask-user","category":"documentation","description":"Operator requires README as the owner; repository requires docs/config.md. Decide the owner before editing."}],"reviewed_paths":["feature.txt"],"summary":"guidance needs a decision","risk_level":"medium"}`)}, nil
+				return &agent.Result{Output: json.RawMessage(`{"findings":[{"severity":"warning","action":"ask-user","category":"documentation","description":"Operator requires README as the owner; repository requires docs/config.md. Decide the owner before editing."}],"reviewed_paths":["feature.txt"],"summary":"guidance needs a decision","risk_level":"medium","risk_rationale":"Applicable guidance requires a decision","risk_scope":"source-or-external"}`)}, nil
 			}}
 			cmds := config.Commands{}
 			if mode == "document" {
