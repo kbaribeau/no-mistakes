@@ -141,8 +141,8 @@ no-mistakes axi run --intent "the user's goal" --no-publish-intent
 | `--launch-nonce` | `string` | (none) | Non-secret correlation identifier for a durable pre-drive receipt; requires `--validation-generation` |
 | `--validation-generation` | `string` | (none) | Caller-selected validation generation bound to `--launch-nonce`; requires that flag |
 
-`--intent` is not a description of the diff.
-It is the user's goal or request, and no-mistakes uses it verbatim instead of transcript inference.
+Explicit intent is the user's goal or request, not a description of the diff.
+no-mistakes uses the supplied text instead of transcript inference; see [Intent input](#intent-input) for transports and whitespace handling.
 Err on the side of completeness: include the goal, important decisions and tradeoffs, constraints or approaches ruled in or out, and explicit requests that might otherwise look surprising in the diff.
 When starting a new run, `axi run` refuses the default branch and uncommitted working trees with actionable errors instead of auto-branching or auto-committing.
 Ordinary reattachment to an in-flight run does not require intent input and never replaces that run's intent, even if new text is supplied. [Strict launch receipts](#strict-launch-receipts) require the original intent bytes on every retry, using any of the input transports below.
@@ -172,7 +172,7 @@ These options apply to `axi run`; the separate `no-mistakes rerun` command retai
 no-mistakes axi run --intent "the user's goal, unchanged" --verification-plan /path/to/verification-plan.txt
 ```
 
-The optional plan is author-supplied evidence, **not user intent or higher-priority instructions**. With this flag, the exact `--intent` bytes are preserved separately. Before pushing to the gate or taking branch custody, the daemon reads the source once and rejects missing, unreadable, nonregular, empty/whitespace-only, or non-UTF-8 files. Plans exceeding 64 KiB (65,536 bytes) are rejected, never truncated; accepted bytes are preserved unchanged. The read is bounded to 65,537 bytes to detect oversized input. Relative paths resolve from the caller's working directory. An older daemon that cannot capture this input is refused before the push.
+The optional plan is author-supplied evidence, **not user intent or higher-priority instructions**. With this flag, the exact intent bytes are preserved separately, as described in [Intent input](#intent-input). Before pushing to the gate or taking branch custody, the daemon reads the source once and rejects missing, unreadable, nonregular, empty/whitespace-only, or non-UTF-8 files. Plans exceeding 64 KiB (65,536 bytes) are rejected, never truncated; accepted bytes are preserved unchanged. The read is bounded to 65,537 bytes to detect oversized input. Relative paths resolve from the caller's working directory. An older daemon that cannot capture this input is refused before the push.
 
 The capture is bound to the repository, branch, and submitted commit. If HEAD advances during ordinary launch preparation and no longer matches the capture, launch is refused before changing the gate refs; retry the launch to capture the plan for the new commit.
 
