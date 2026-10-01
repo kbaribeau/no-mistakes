@@ -53,7 +53,7 @@ task along with the command:
      a feature branch**. If the user is on the repository's default branch,
      create a feature branch first - the gate validates committed history on a
      non-default branch, so the work must land there before you run.
-  3. **Then validate**, passing the user's task as your `--intent`. The task
+  3. **Then validate**, passing the user's task as explicit intent. The task
      text is exactly what the user set out to accomplish, in their own words, so
      it *is* the intent - preserve requirements stated directly by the user,
      including constraints, exclusions, acceptance criteria, and later decisions;
@@ -120,14 +120,18 @@ If it shows an active run on another branch, leave that run alone and start vali
 
 ## Intent is required
 
-When you start a run you must pass `--intent`: **what the user set out to
+When you start a new run you must supply explicit intent through exactly one of
+`--intent TEXT`, `--intent-file PATH`, or `--intent -` (stdin until EOF):
+**what the user set out to
 accomplish** - the goal or request behind this work, in their terms. This is not
 a description of the diff or the files you changed; it is the objective the
 change is meant to achieve. You know it from the conversation, so pass it
-directly - no-mistakes uses it verbatim instead of inferring it from local agent
-transcripts (slower and flakier).
+directly - no-mistakes uses the supplied intent instead of inferring it from local
+agent transcripts. Empty or whitespace-only input is rejected, never inferred.
+For input handling, whitespace preservation, and reattachment semantics, see the
+[CLI intent input reference](https://kunchenguid.github.io/no-mistakes/reference/cli/#intent-input).
 
-Err on the side of completeness, not brevity. The review step uses `--intent`
+Err on the side of completeness, not brevity. The review step uses explicit intent
 to tell a deliberate decision apart from a mistake, so a thin one-line summary
 makes it flag things the user already chose. Capture the nuance: the user's
 goal, the specific decisions and tradeoffs they made along the way, any
@@ -209,6 +213,8 @@ Run the pipeline and decide on its findings as they come up:
    gate.
 
     Each `respond` blocks until the next `gate:`, `checks-passed` decision point, or final outcome, subject to the same default `--wait 8m` hold.
+
+    A review gate whose findings are `question-<id>` rows is waiting on answers to its reviewer's questions, not on a verdict: answer each with `no-mistakes axi answer --question <id> --answer "<one of its options>"` instead of approving or fixing. The answer that closes the last open question blocks exactly like `respond` and returns the next `gate:` or outcome; any other answer returns at once.
 
     Extra flags on `respond`:
     - `--wait` bounds the hold (default 8m).

@@ -128,7 +128,8 @@ no-mistakes axi run --intent "the user's goal" --no-publish-intent
 
 | Flag            | Type     | Default | Description                                                                                          |
 | --------------- | -------- | ------- | ---------------------------------------------------------------------------------------------------- |
-| `--intent`      | `string` | (none)  | What the user set out to accomplish; required to start a new run                                     |
+| `--intent`      | `string` | (none)  | What the user set out to accomplish; `-` reads stdin to EOF; exclusive with `--intent-file` |
+| `--intent-file` | `string` | (none)  | Read intent from a file relative to the caller's working directory; exclusive with `--intent` |
 | `--verification-plan` | `string` | (none) | Path to a nonempty UTF-8 verification plan, at most 64 KiB (65,536 bytes), captured as separate evidence for a new run only |
 | `-y`, `--yes`   | `bool`   | `false` | Auto-resolve eligible gates until a decision point or outcome                                       |
 | `--skip`        | `string` | (none)  | Comma-separated pipeline steps to skip                                                               |
@@ -140,11 +141,32 @@ no-mistakes axi run --intent "the user's goal" --no-publish-intent
 | `--launch-nonce` | `string` | (none) | Non-secret correlation identifier for a durable pre-drive receipt; requires `--validation-generation` |
 | `--validation-generation` | `string` | (none) | Caller-selected validation generation bound to `--launch-nonce`; requires that flag |
 
-`--intent` is not a description of the diff.
-It is the user's goal or request, and no-mistakes uses it verbatim instead of transcript inference.
+Explicit intent is the user's goal or request, not a description of the diff.
+no-mistakes uses the supplied text instead of transcript inference; see [Intent input](#intent-input) for transports and whitespace handling.
 Err on the side of completeness: include the goal, important decisions and tradeoffs, constraints or approaches ruled in or out, and explicit requests that might otherwise look surprising in the diff.
 When starting a new run, `axi run` refuses the default branch and uncommitted working trees with actionable errors instead of auto-branching or auto-committing.
-Ordinary reattachment to an in-flight run does not require `--intent`; [strict launch receipts](#strict-launch-receipts) require the original intent bytes on every retry.
+Ordinary reattachment to an in-flight run does not require intent input and never replaces that run's intent, even if new text is supplied. [Strict launch receipts](#strict-launch-receipts) require the original intent bytes on every retry, using any of the input transports below.
+
+### Intent input
+
+A new run requires exactly one of `--intent TEXT`, `--intent-file PATH`, or `--intent -` (stdin until EOF). Explicit empty or whitespace-only input is rejected, including on reattachment, and never falls back to transcript inference. `--intent` and `--intent-file` conflict even when either flag's value is empty. Missing/unreadable files and stdin read errors are rejected before starting a run or taking branch custody. No flag means stdin is not read.
+
+All three inputs must be valid UTF-8 and at most **49,122 bytes**, including whitespace. This ceiling comes from the existing single Git push-option transport: its 65,516-byte packet payload must hold the option prefix and base64-encoded intent. Oversized or malformed input is rejected before run resources open, never truncated or repaired. `--intent-file` requires a regular file (a symlink to one is allowed); directories, devices, and named pipes are rejected. Use `--intent -` for piped input: it reads until EOF, or rejects as soon as the size limit is exceeded, with no input timeout.
+
+File and stdin content reaches the existing run request unchanged, including quotes, backticks, dollar signs, Unicode, and multiline/trailing newline content. All three transports then follow the same existing run semantics: ordinary explicit intent is stored with leading/trailing whitespace removed; strict launches and runs with a verification-plan attachment preserve those bytes. This is not a universal persisted-byte guarantee. File paths are literal (`--intent-file -` names a file called `-`); only `--intent -` selects stdin. To supply the literal intent `-`, use a file or stdin.
+
+```sh
+no-mistakes axi run --intent-file ./intent.md
+no-mistakes axi run --intent - < ./intent.md
+# INTENT already contains the prose; quoting the expansion preserves it.
+printf '%s' "$INTENT" | no-mistakes axi run --intent -
+```
+
+The clean-worktree preflight still applies: keep an untracked intent file outside the worktree or ignore it.
+
+For programmatic callers, prefer a file or write the text to the process's stdin; an argument-array API without a shell also safely supports `--intent TEXT`. Avoid interpolating free-form prose into shell command source: substitutions inside double quotes (such as backticks and `$()`) run in the **caller's shell**, before no-mistakes sees the argument. File/stdin input is not shell-evaluated by no-mistakes, but does not make unrelated unsafe shell commands safe. These transports do not change intent storage, prompt use, or publication policy; they are not a privacy control. Downstream transport limits still apply.
+
+These options apply to `axi run`; the separate `no-mistakes rerun` command retains its existing inheritance and explicit-string override semantics.
 
 ### Verification plan attachment
 
@@ -152,7 +174,7 @@ Ordinary reattachment to an in-flight run does not require `--intent`; [strict l
 no-mistakes axi run --intent "the user's goal, unchanged" --verification-plan /path/to/verification-plan.txt
 ```
 
-The optional plan is author-supplied evidence, **not user intent or higher-priority instructions**. With this flag, the exact `--intent` bytes are preserved separately. Before pushing to the gate or taking branch custody, the daemon reads the source once and rejects missing, unreadable, nonregular, empty/whitespace-only, or non-UTF-8 files. Plans exceeding 64 KiB (65,536 bytes) are rejected, never truncated; accepted bytes are preserved unchanged. The read is bounded to 65,537 bytes to detect oversized input. Relative paths resolve from the caller's working directory. An older daemon that cannot capture this input is refused before the push.
+The optional plan is author-supplied evidence, **not user intent or higher-priority instructions**. With this flag, the exact intent bytes are preserved separately, as described in [Intent input](#intent-input). Before pushing to the gate or taking branch custody, the daemon reads the source once and rejects missing, unreadable, nonregular, empty/whitespace-only, or non-UTF-8 files. Plans exceeding 64 KiB (65,536 bytes) are rejected, never truncated; accepted bytes are preserved unchanged. The read is bounded to 65,537 bytes to detect oversized input. Relative paths resolve from the caller's working directory. An older daemon that cannot capture this input is refused before the push.
 
 The capture is bound to the repository, branch, and submitted commit. If HEAD advances during ordinary launch preparation and no longer matches the capture, launch is refused before changing the gate refs; retry the launch to capture the plan for the new commit.
 
@@ -164,7 +186,7 @@ Only attached runs receive plan-aware guidance. Review and Test assess the propo
 
 ### Other run options
 
-`--base-branch` is persisted on the run so rebase, PR, and CI honor it after resume.
+`--base-branch` is persisted on the run and honored after resume; the [Pipeline Steps scope rules](/no-mistakes/reference/pipeline-steps/) own its integration and change-scoping behavior.
 Reattaching with a `--base-branch` that differs from the active run's stored target is refused rather than silently discarded; omit the flag to reattach, or abort the active run first.
 `--no-publish-intent` is likewise persisted on the run, and reattaching with it against an active run started without it is refused rather than silently discarded; omit the flag to reattach, or abort the active run first.
 Before starting a run that may omit the section (this flag set, the global `intent.publish_intent` default `false`, or a global config that cannot be read), `axi run` probes the running daemon for the capability and refuses to start anything when that daemon is too old to honor it (an older daemon would silently drop the field, never read the global default, and publish); restart the daemon with the current binary. Only a run that cannot omit (flag unset, global default `true`) may reuse an older daemon. `rerun` always probes, because it inherits omission from the selected prior run and only the daemon knows that selection.
@@ -209,7 +231,7 @@ When the pipeline applied fixes, they include a `fixes` table and a `help` instr
 
 Supply `--launch-nonce` and `--validation-generation` together to bind a launch to an exact request instead of reattaching by branch and head alone.
 Both identifiers must be 1–128 ASCII characters from `A-Z`, `a-z`, `0-9`, `.`, `_`, `~`, and `-`; they are non-secret correlation values and must not contain credentials.
-This mode requires the same exact `--intent` bytes on retries.
+This mode requires the same exact intent bytes on retries, whether supplied as a string, file, or stdin.
 
 ```sh
 no-mistakes axi run --intent "the user's goal" \
@@ -284,10 +306,13 @@ no-mistakes axi answer --question q1 --answer "Keep it behind a flag" --by capta
 | `--question` | `string` | (none)             | Question ID, as carried by the review gate's `question-<id>` findings, or named by the gate's omission notice when more questions are open than the gate renders as rows; required |
 | `--answer`   | `string` | (none)             | The answer, ideally one of the question's stated options; required       |
 | `--by`       | `string` | (none)             | Who answered; recorded on the PR and in the branch's settled questions   |
+| `--wait`     | `duration` | `8m`             | Maximum time the answer that closes the last open question blocks following the run, as for `axi respond`; any other answer returns at once |
 
 The run is always the current branch's active run, and there is deliberately no `--run`: `axi`'s run resolution is branch-scoped, and this command mutates, so a second selection path could land an answer meant for one branch's reviewer on another's. Run it from a clone of the repository whose run it answers - the repository is resolved from the working directory, so a directory outside any initialized repository reports `repo not initialized` rather than answering.
 
 This is not a gate response, and `axi respond` does not accept an answer. The answer is appended to the run's review conversation immediately, so a reviewer that is still working reads it at its next checkpoint and can redirect the rest of its pass. The output reports `open_questions` and `reviewer_resumed`: once no question is open, the daemon resumes that same reviewer session with the answers so it can finish its pass, rather than the caller approving or fixing to get past the gate.
+
+The answer that closes the last open question sets the run moving again, so it then behaves exactly like `axi respond` after its response: it blocks until the next `gate:`, `checks-passed`, or final `outcome:`, bounded by `--wait`, and returns that document led by the answer's own fields. That holds whether the reviewer was already parked (`reviewer_resumed: true`) or still finishing its turn, in which case the gate resumes the reviewer itself as soon as it parks. A review gate that still carries questions right after the answer is given one [`gate_reconcile_timeout`](/no-mistakes/reference/global-config/) to leave, because a park registered just after the answer landed briefly still lists the question it closed until the daemon releases it; one still there after that asks something new and is returned. Two cases end that grace differently: a park restored by a daemon restart is not re-checked until one [`gate_reconcile_interval`](/no-mistakes/reference/global-config/) has passed, so the grace can expire before it is released and the park you just answered comes back; and a `--wait` at or below the grace elapses before the grace does, so even a genuine new question is reported as an elapsed wait rather than a `gate:`. If it returns another `gate:`, answer that gate. An answer that leaves questions open, or closes none, returns at once. An elapsed wait, and a park that came back already answered, both reattach with `axi run`, never by answering again.
 
 Every answered question is recorded per branch, so a later cold reviewer receives it as settled and does not re-raise it, and the question and answer appear in the PR body's review conversation.
 
