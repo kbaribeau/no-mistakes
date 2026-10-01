@@ -128,7 +128,8 @@ no-mistakes axi run --intent "the user's goal" --no-publish-intent
 
 | Flag            | Type     | Default | Description                                                                                          |
 | --------------- | -------- | ------- | ---------------------------------------------------------------------------------------------------- |
-| `--intent`      | `string` | (none)  | What the user set out to accomplish; required to start a new run                                     |
+| `--intent`      | `string` | (none)  | What the user set out to accomplish; `-` reads stdin to EOF; exclusive with `--intent-file` |
+| `--intent-file` | `string` | (none)  | Read intent from a file relative to the caller's working directory; exclusive with `--intent` |
 | `--verification-plan` | `string` | (none) | Path to a nonempty UTF-8 verification plan, at most 64 KiB (65,536 bytes), captured as separate evidence for a new run only |
 | `-y`, `--yes`   | `bool`   | `false` | Auto-resolve eligible gates until a decision point or outcome                                       |
 | `--skip`        | `string` | (none)  | Comma-separated pipeline steps to skip                                                               |
@@ -144,7 +145,26 @@ no-mistakes axi run --intent "the user's goal" --no-publish-intent
 It is the user's goal or request, and no-mistakes uses it verbatim instead of transcript inference.
 Err on the side of completeness: include the goal, important decisions and tradeoffs, constraints or approaches ruled in or out, and explicit requests that might otherwise look surprising in the diff.
 When starting a new run, `axi run` refuses the default branch and uncommitted working trees with actionable errors instead of auto-branching or auto-committing.
-Ordinary reattachment to an in-flight run does not require `--intent`; [strict launch receipts](#strict-launch-receipts) require the original intent bytes on every retry.
+Ordinary reattachment to an in-flight run does not require intent input and never replaces that run's intent, even if new text is supplied. [Strict launch receipts](#strict-launch-receipts) require the original intent bytes on every retry, using any of the input transports below.
+
+### Intent input
+
+A new run requires exactly one of `--intent TEXT`, `--intent-file PATH`, or `--intent -` (stdin until EOF). Explicit empty or whitespace-only input is rejected, including on reattachment, and never falls back to transcript inference. `--intent` and `--intent-file` conflict even when either flag's value is empty. Missing/unreadable files and stdin read errors are rejected before starting a run or taking branch custody. No flag means stdin is not read.
+
+File and stdin content reaches the existing run request unchanged, including quotes, backticks, dollar signs, Unicode, and multiline/trailing newline content. All three transports then follow the same existing run semantics: ordinary explicit intent is stored with leading/trailing whitespace removed; strict launches and runs with a verification-plan attachment preserve those bytes. This is not a universal persisted-byte guarantee. File paths are literal (`--intent-file -` names a file called `-`); only `--intent -` selects stdin. To supply the literal intent `-`, use a file or stdin.
+
+```sh
+no-mistakes axi run --intent-file ./intent.md
+no-mistakes axi run --intent - < ./intent.md
+# INTENT already contains the prose; quoting the expansion preserves it.
+printf '%s' "$INTENT" | no-mistakes axi run --intent -
+```
+
+The clean-worktree preflight still applies: keep an untracked intent file outside the worktree or ignore it.
+
+For programmatic callers, prefer a file or write the text to the process's stdin; an argument-array API without a shell also safely supports `--intent TEXT`. Avoid interpolating free-form prose into shell command source: substitutions inside double quotes (such as backticks and `$()`) run in the **caller's shell**, before no-mistakes sees the argument. File/stdin input is not shell-evaluated by no-mistakes, but does not make unrelated unsafe shell commands safe. These transports do not change intent storage, prompt use, or publication policy; they are not a privacy control. Downstream transport limits still apply.
+
+These options apply to `axi run`; the separate `no-mistakes rerun` command retains its existing inheritance and explicit-string override semantics.
 
 ### Verification plan attachment
 
@@ -209,7 +229,7 @@ When the pipeline applied fixes, they include a `fixes` table and a `help` instr
 
 Supply `--launch-nonce` and `--validation-generation` together to bind a launch to an exact request instead of reattaching by branch and head alone.
 Both identifiers must be 1–128 ASCII characters from `A-Z`, `a-z`, `0-9`, `.`, `_`, `~`, and `-`; they are non-secret correlation values and must not contain credentials.
-This mode requires the same exact `--intent` bytes on retries.
+This mode requires the same exact intent bytes on retries, whether supplied as a string, file, or stdin.
 
 ```sh
 no-mistakes axi run --intent "the user's goal" \
