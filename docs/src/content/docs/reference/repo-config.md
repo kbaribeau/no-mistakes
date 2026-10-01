@@ -405,11 +405,12 @@ Repository-specific documentation ownership policy for the document step.
 
 The document step always applies a built-in placement policy: every fact has exactly one authoritative owner document, stale duplicates are removed or reduced to pointers instead of synchronized, no new documentation surfaces are created merely to close perceived gaps, and incident lessons live as invariants near their owner (with a pointer to the regression test), never as AGENTS.md postmortems. Its agent prompt treats `AGENTS.md` and `CLAUDE.md` as memory files: it may correct or remove factually wrong content, but must not add content because something is missing, create absent files, or restructure or expand them. This is prompt guidance, not a file guard.
 `document.instructions` states this repository's ownership map or extra placement rules (for example, which file owns which class of facts).
+Document guidance has no configured byte cap, per source or combined; it does not consume the Review path-instruction budget. This is not a guarantee that arbitrarily large guidance fits an agent's context.
 It augments or clarifies the built-in policy; it cannot disable documentation integrity, and it cannot turn the memory files into an automated documentation surface - instructions that encourage additions to `AGENTS.md` or `CLAUDE.md` do not take effect over the built-in correction-only rule.
 
 Like `commands.*` and `agent`, this field steers gate behavior, so it is honored **only from the trusted default-branch copy** of `.no-mistakes.yaml`: a contributor's pushed branch cannot weaken the documentation rules that gate its own review.
 
-The document step states the source of every policy block it receives, so this repository's policy and an operator's ([`repo_instructions`](/no-mistakes/reference/global-config/#repo_instructions) in the global config) are told apart rather than merged into one anonymous rule. Operator guidance is supplemental, not an override; the [conflict contract](/no-mistakes/reference/global-config/#scope-additive-guidance-only) asks the agent to surface irreconcilable requirements for a decision.
+The document step states the source of every policy block it receives, so this repository's policy and an operator's ([global `document.instructions`](/no-mistakes/reference/global-config/#documentinstructions) or checkout-scoped [`repo_instructions`](/no-mistakes/reference/global-config/#repo_instructions)) are told apart rather than merged into one anonymous rule. Operator guidance is supplemental, not an override; the [conflict contract](/no-mistakes/reference/global-config/#scope-additive-guidance-only) asks the agent to surface irreconcilable requirements for a decision.
 
 ### review.conversation
 

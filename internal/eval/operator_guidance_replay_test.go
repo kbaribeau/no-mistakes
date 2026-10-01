@@ -22,6 +22,8 @@ review:
   path_instructions:
     - path: '*.go'
       instructions: global historical rule
+document:
+  instructions: global historical document policy
 repo_instructions:
   %q:
     review:
@@ -44,6 +46,9 @@ repo_instructions:
 	live, err := config.ResolveForRepository(global, repo, "", checkout)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(live.Document.Instructions) != 3 || live.Document.Instructions[0].Source != config.InstructionSourceOperatorGlobal {
+		t.Fatalf("global document policy missing before capture: %+v", live.Document)
 	}
 	if err := live.EnableEvalProvenance(global, repo); err != nil {
 		t.Fatal(err)

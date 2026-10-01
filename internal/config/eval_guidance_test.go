@@ -16,6 +16,8 @@ review:
   path_instructions:
     - path: '*.go'
       instructions: global rule
+document:
+  instructions: historical global document policy
 repo_instructions:
   %q:
     review:
@@ -39,10 +41,16 @@ repo_instructions:
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(live.Document.Instructions) != 3 || live.Document.Instructions[0].Source != InstructionSourceOperatorGlobal {
+		t.Fatalf("global document policy not selected: %+v", live.Document)
+	}
 	if err := live.EnableEvalProvenance(global, repo); err != nil {
 		t.Fatal(err)
 	}
 	oldSnapshot := append([]byte(nil), live.ReplayGlobalYAML...)
+	if strings.Count(string(oldSnapshot), "historical global document policy") != 1 {
+		t.Fatal("global document must occur only in the selected snapshot, not raw global config")
+	}
 	for _, unwanted := range []string{checkout, other, "unrelated-private-checkout", "unrelated private rubric", "repo_instructions:"} {
 		if strings.Contains(string(oldSnapshot), unwanted) {
 			t.Fatalf("snapshot retained unrelated guidance or a selection path %q", unwanted)
@@ -57,7 +65,7 @@ repo_instructions:
 	}
 	// Model recovery's actual resolver with changed operator config. It must
 	// see edits without mutating the still-live executor or the older record.
-	current := loadGlobalOrFail(t, strings.ReplaceAll(source, "historical checkout", "updated checkout"))
+	current := loadGlobalOrFail(t, strings.ReplaceAll(source, "historical", "updated"))
 	recovered, err := ResolveForRepository(current, repo, "", checkout)
 	if err != nil {
 		t.Fatal(err)
@@ -68,11 +76,14 @@ repo_instructions:
 	if got := recovered.Review.PathInstructions[1].Instructions; got != "updated checkout rule" {
 		t.Fatalf("recovery did not reread: %q", got)
 	}
+	if got := recovered.Document.Instructions[0].Text; got != "updated global document policy" {
+		t.Fatalf("global document recovery did not reread: %q", got)
+	}
 	if got := live.Review.PathInstructions[1].Instructions; got != "historical checkout rule" {
 		t.Fatalf("uninterrupted config changed: %q", got)
 	}
 	again, err := LoadEvalConfig(oldSnapshot, live.ReplayRepoYAML)
-	if err != nil || !reflect.DeepEqual(again.Review, live.Review) || !reflect.DeepEqual(oldSnapshot, live.ReplayGlobalYAML) {
+	if err != nil || !reflect.DeepEqual(again.Review, live.Review) || !reflect.DeepEqual(again.Document, live.Document) || !reflect.DeepEqual(oldSnapshot, live.ReplayGlobalYAML) {
 		t.Fatalf("older round no longer preserves its historical input: %v", err)
 	}
 	// Snapshot metadata must not become a user-controlled config surface.
@@ -80,7 +91,7 @@ repo_instructions:
 }
 
 func TestPrepareEvalGlobal_LegacyWithoutCheckoutGuidanceIsUnambiguous(t *testing.T) {
-	global := []byte("review:\n  path_instructions:\n    - path: '*.go'\n      instructions: old global rule\n")
+	global := []byte("review:\n  path_instructions:\n    - path: '*.go'\n      instructions: old global rule\ndocument:\n  instructions: old global document policy\n")
 	repo := []byte("review:\n  path_instructions:\n    - path: 'docs/**'\n      instructions: old repository rule\n")
 	prepared, err := PrepareEvalGlobal(global, repo)
 	if err != nil {
@@ -92,6 +103,9 @@ func TestPrepareEvalGlobal_LegacyWithoutCheckoutGuidanceIsUnambiguous(t *testing
 	}
 	if cfg.Review.PathInstructions[0].Source != InstructionSourceOperatorGlobal || cfg.Review.PathInstructions[1].Source != InstructionSourceRepository {
 		t.Fatalf("legacy source labels lost: %+v", cfg.Review.PathInstructions)
+	}
+	if len(cfg.Document.Instructions) != 1 || cfg.Document.Instructions[0] != (DocumentInstruction{Source: InstructionSourceOperatorGlobal, Text: "old global document policy"}) {
+		t.Fatalf("legacy global document guidance lost: %+v", cfg.Document)
 	}
 	again, err := PrepareEvalGlobal(prepared, repo)
 	if err != nil || string(again) != string(prepared) {
@@ -119,7 +133,9 @@ func TestLoadEvalConfig_RefusesIncompleteOrInvalidGuidanceSnapshot(t *testing.T)
 		{"forged source", strings.Replace(valid, "review: []", "review:\n    - path: '*.go'\n      instructions: rule\n      source: someone else", 1)},
 		{"unknown nested field", strings.Replace(valid, "review: []", "review:\n    - path: '*.go'\n      instruction: ignored", 1)},
 		{"checkout map retained", valid + "repo_instructions: {}\n"},
-		{"global document snapshot", strings.Replace(valid, "document: []", "document:\n    - text: invalid scope\n      source: operator configuration for every repository", 1)},
+		{"forged document source", strings.Replace(valid, "document: []", "document:\n    - text: invalid scope\n      source: someone else", 1)},
+		{"empty global document", strings.Replace(valid, "document: []", "document:\n    - text: ''\n      source: operator configuration for every repository", 1)},
+		{"unusable global document", strings.Replace(valid, "document: []", "document:\n    - text: '======='\n      source: operator configuration for every repository", 1)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := LoadEvalConfig([]byte(tc.data), []byte("{}\n")); err == nil {

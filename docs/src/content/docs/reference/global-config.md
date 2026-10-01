@@ -68,6 +68,10 @@ review:
         Repeated instances of a component are driven from a computed,
         not stacked v-ifs.
 
+document:
+  instructions: |
+    Never write a postmortem into AGENTS.md.
+
 repo_instructions:
   /Users/you/src/my-repo:
     review:
@@ -756,6 +760,19 @@ Entries here apply to **every** gated repository. Guidance true of one repositor
 
 Each operator source allows at most 16 entries and 8,192 accounted bytes. The selected sources must also fit the shared [Budget](#budget); individually valid files can form an over-budget combination.
 
+### document.instructions
+
+Your own documentation guidance for **every** gated repository, including repositories with no `.no-mistakes.yaml`.
+
+| | |
+| --- | --- |
+| Type | `string` (multiline) |
+| Default | Empty (built-in placement policy only) |
+
+The repository's [`document.instructions`](/no-mistakes/reference/repo-config/#documentinstructions) reference owns the placement rules and size policy. Global guidance uses those same semantics and supplements, never replaces, the built-in and trusted repository policies. Each block is labelled with its source; incompatible requirements follow the [supplemental-guidance contract](#scope-additive-guidance-only).
+
+Use this field for requirements that apply to every repository. Keep repository-specific ownership maps under [`repo_instructions`](#repo_instructions). Empty or whitespace-only text adds no block; nonblank text that becomes empty after removing merge-conflict markers is rejected.
+
 ### repo_instructions
 
 Your own review and documentation guidance for **one** registered repository.
@@ -780,7 +797,7 @@ repo_instructions:
         Configuration keys are owned by docs/reference/config.md.
 ```
 
-Review guidance uses the same matching rules as the global review block. Document guidance uses the repository's [`document.instructions`](/no-mistakes/reference/repo-config/#documentinstructions) semantics, scoped to this checkout. There is no machine-wide `document.instructions` field. Each entry carries the 16-entry, 8,192-byte review budget the global block carries.
+Review guidance uses the same matching rules as the global review block. Document guidance uses the same semantics as [`document.instructions`](#documentinstructions), scoped to this checkout and added alongside global and trusted repository policy. Each entry carries the 16-entry, 8,192-byte review budget the global block carries.
 
 #### Scope: additive guidance only
 
@@ -801,6 +818,8 @@ Blocks are ordered from the widest scope to the narrowest - global, then `repo_i
 Duplicate review rules (same `path` **and** same `instructions`) are injected once regardless of source.
 
 #### Budget
+
+These limits apply to `review.path_instructions`; Document guidance follows the separate [`document.instructions`](/no-mistakes/reference/repo-config/#documentinstructions) semantics.
 
 The combined global → selected checkout → trusted repository set may contain at most **32 entries**, before path matching or deduplication. Its byte allowance is the original repository-only **16,384-byte budget**, plus only the extra heading and per-entry source-label framing. The accounting reserves the longest source label and the full bounded matched-file list, not model tokens. Previously valid repository-only guidance keeps its room; operator sources share that room rather than each adding another budget to the total.
 

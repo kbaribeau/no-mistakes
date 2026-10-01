@@ -7,16 +7,15 @@ import (
 	"testing"
 )
 
-func TestLoadGlobal_DocumentGuidanceRequiresACheckout(t *testing.T) {
-	loadGlobalWantError(t, "document:\n  instructions: all projects use docs/config.md\n", "document", "not found in type")
-	global := loadGlobalOrFail(t, "agent: claude\n")
+func TestLoadGlobal_GlobalDocumentPreservesAgentAndTrustedPolicy(t *testing.T) {
+	global := loadGlobalOrFail(t, "agent: claude\ndocument:\n  instructions: keep facts with their owner\n")
 	if global.Agent != "claude" {
 		t.Fatalf("legitimate top-level agent setting lost: %q", global.Agent)
 	}
 	repo := &RepoConfig{Document: DocumentRaw{Instructions: "repository policy"}}
 	cfg := Merge(global, repo)
-	if len(cfg.Document.Instructions) != 1 || cfg.Document.Instructions[0].Source != InstructionSourceRepository {
-		t.Fatalf("trusted repository document policy lost: %+v", cfg.Document)
+	if len(cfg.Document.Instructions) != 2 || cfg.Document.Instructions[0].Source != InstructionSourceOperatorGlobal || cfg.Document.Instructions[1].Source != InstructionSourceRepository {
+		t.Fatalf("global or trusted repository document policy lost: %+v", cfg.Document)
 	}
 }
 
@@ -35,6 +34,7 @@ func TestLoadGlobal_RepoInstructionsRejectsNestedUnknownKeys(t *testing.T) {
 		{"merged unknown key", "document:\n  <<: &policy\n    instruction: hidden rule\n  instructions: valid\n", "instruction"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			loadGlobalWantError(t, tc.block, tc.field, "not found in type")
 			block := "    " + strings.ReplaceAll(strings.TrimSuffix(tc.block, "\n"), "\n", "\n    ") + "\n"
 			loadGlobalWantError(t, "repo_instructions:\n  "+yamlPath(checkout)+":\n"+block, tc.field, "not found in type")
 		})

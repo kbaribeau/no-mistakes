@@ -105,7 +105,8 @@ func TestOperatorGuidance_ConflictsUseExistingDecisionFindings(t *testing.T) {
 				{Path: "*.txt", Instructions: repository, Source: config.InstructionSourceRepository},
 			}}
 			sctx.Config.Document.Instructions = []config.DocumentInstruction{
-				{Text: operator, Source: config.InstructionSourceOperatorRepo},
+				{Text: operator, Source: config.InstructionSourceOperatorGlobal},
+				{Text: "Keep the chosen owner unique.", Source: config.InstructionSourceOperatorRepo},
 				{Text: repository, Source: config.InstructionSourceRepository},
 			}
 			var step pipeline.Step = &DocumentStep{}
@@ -134,12 +135,11 @@ func TestOperatorGuidance_ConflictsUseExistingDecisionFindings(t *testing.T) {
 					t.Errorf("prompt lost %q", want)
 				}
 			}
-			operatorSource := config.InstructionSourceOperatorRepo
-			if mode == "review" {
-				operatorSource = config.InstructionSourceOperatorGlobal
+			if !strings.Contains(prompt, "source: "+string(config.InstructionSourceOperatorGlobal)) {
+				t.Fatal("global operator source lost")
 			}
-			if !strings.Contains(prompt, "source: "+string(operatorSource)) {
-				t.Fatal("operator source lost")
+			if mode != "review" && (!strings.Contains(prompt, "Keep the chosen owner unique.") || !strings.Contains(prompt, "source: "+string(config.InstructionSourceOperatorRepo))) {
+				t.Fatal("scoped document policy lost beside the conflict")
 			}
 			findings, err := types.ParseFindingsJSON(out.Findings)
 			if err != nil {
@@ -165,7 +165,7 @@ func TestOperatorGuidance_ConflictsUseExistingDecisionFindings(t *testing.T) {
 	}
 }
 
-// The document gate reads scoped operator and repository policy, each attributed. The
+// The document gate reads global, scoped and repository policy, each attributed. The
 // framing must stay "augments the defaults", because operator guidance can only
 // add to what a pass requires.
 func TestDocumentStep_PolicyBlocksFromEverySourceAreAttributed(t *testing.T) {
@@ -179,6 +179,7 @@ func TestDocumentStep_PolicyBlocksFromEverySourceAreAttributed(t *testing.T) {
 	}
 	sctx := newTestContextWithDBRecords(t, ag, dir, baseSHA, headSHA, config.Commands{})
 	sctx.Config.Document.Instructions = []config.DocumentInstruction{
+		{Source: config.InstructionSourceOperatorGlobal, Text: "Never write a postmortem into AGENTS.md."},
 		{Source: config.InstructionSourceOperatorRepo, Text: "Configuration keys are owned by docs/reference/config.md."},
 		{Source: config.InstructionSourceRepository, Text: "docs/architecture.md owns the daemon lifecycle facts."},
 	}

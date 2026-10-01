@@ -19,6 +19,7 @@ const (
 	operatorGlobalRule = "Every changed file needs a reason recorded in the commit message."
 	operatorScopedRule = "Sync wording is always \"sync from ATTAINS\" - it is a one-way overwrite."
 	operatorDocPolicy  = "Configuration keys are owned by docs/reference/config.md."
+	operatorGlobalDoc  = "Keep durable lessons with their owning documentation and regression test."
 )
 
 // TestOperatorOwnedInstructionsJourney is the end-to-end proof for a repository
@@ -27,6 +28,14 @@ const (
 // repository and the repo_instructions block for this one, each attributed to
 // the configuration it came from.
 func TestOperatorOwnedInstructionsJourney(t *testing.T) {
+	for _, scoped := range []bool{false, true} {
+		t.Run(fmt.Sprintf("scoped=%v", scoped), func(t *testing.T) {
+			testOperatorOwnedInstructionsJourney(t, scoped)
+		})
+	}
+}
+
+func testOperatorOwnedInstructionsJourney(t *testing.T, scoped bool) {
 	h := NewHarness(t, SetupOpts{Agent: "claude", NoRepoConfig: true})
 	assertNoRepositoryConfig(t, h)
 	if out, err := h.Run("init"); err != nil {
@@ -35,12 +44,17 @@ func TestOperatorOwnedInstructionsJourney(t *testing.T) {
 
 	// Written after init because repo_instructions is keyed by the checkout
 	// path init registers, which is the same key worktree_roots uses.
-	appendGlobalConfig(t, h, fmt.Sprintf(`review:
+	guidance := fmt.Sprintf(`review:
   path_instructions:
     - path: 'internal/**'
       instructions: |
         %s
-repo_instructions:
+document:
+  instructions: |
+    %s
+`, operatorGlobalRule, operatorGlobalDoc)
+	if scoped {
+		guidance += fmt.Sprintf(`repo_instructions:
   %q:
     review:
       path_instructions:
@@ -50,7 +64,9 @@ repo_instructions:
     document:
       instructions: |
         %s
-`, operatorGlobalRule, h.WorkDir, operatorScopedRule, operatorDocPolicy))
+`, h.WorkDir, operatorScopedRule, operatorDocPolicy)
+	}
+	appendGlobalConfig(t, h, guidance)
 
 	branch := "operator-owned-instructions"
 	h.CommitChange(branch, "internal/scm/github/github.go", "package github\n\n// changed\n", "touch scm")
@@ -75,6 +91,12 @@ repo_instructions:
 		{config.InstructionSourceOperatorGlobal, "internal/**", operatorGlobalRule},
 		{config.InstructionSourceOperatorRepo, "internal/scm/**", operatorScopedRule},
 	} {
+		if !scoped && want.source == config.InstructionSourceOperatorRepo {
+			if strings.Contains(prompt, want.rule) {
+				t.Fatal("unconfigured scoped review rule reached the prompt")
+			}
+			continue
+		}
 		block := config.ReviewPathInstructionsPathLabel + want.glob + "\n" +
 			config.ReviewPathInstructionsSourceLabel + string(want.source) + "\n" +
 			config.ReviewPathInstructionsFilesLabel + "internal/scm/github/github.go\n" +
@@ -87,13 +109,19 @@ repo_instructions:
 	// The operator's documentation policy reaches the document gate the same
 	// way, and says where it came from.
 	docPrompt := documentPrompt(t, h)
-	if !strings.Contains(docPrompt, "source: "+string(config.InstructionSourceOperatorRepo)+"\n"+operatorDocPolicy) {
-		t.Errorf("document prompt is missing the attributed operator policy:\n%s", docPrompt)
+	if !strings.Contains(docPrompt, "source: "+string(config.InstructionSourceOperatorGlobal)+"\n"+operatorGlobalDoc) {
+		t.Errorf("document prompt is missing the attributed global policy:\n%s", docPrompt)
+	}
+	if got := strings.Contains(docPrompt, "source: "+string(config.InstructionSourceOperatorRepo)+"\n"+operatorDocPolicy); got != scoped {
+		t.Errorf("scoped document policy presence=%v, want %v", got, scoped)
+	}
+	if strings.Contains(docPrompt, "source: "+string(config.InstructionSourceRepository)+"\n") {
+		t.Fatal("repository with no config gained an attributed repository policy")
 	}
 
 	assertNoRepositoryConfig(t, h)
 	t.Logf("review prompt tail:\n%s", promptTail(prompt))
-	t.Logf("document prompt carries operator policy: %s", operatorDocPolicy)
+	t.Logf("document prompt carries global policy with scoped=%v: %s", scoped, operatorGlobalDoc)
 }
 
 // assertNoRepositoryConfig checks positive tree reads, not a failed git show:

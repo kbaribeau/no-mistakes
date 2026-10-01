@@ -166,13 +166,13 @@ type GlobalConfig struct {
 	// by path ancestry and therefore never reaches a worktree under NM_HOME.
 	// Placement is resolved for every consumer in internal/worktrees.
 	WorktreeRoots map[string]string `yaml:"worktree_roots"`
-	// Review carries additive operator review guidance for every gated
-	// repository. Documentation guidance belongs to a specific checkout in
-	// RepoInstructions, never to a machine-wide document block.
+	// Review and Document carry additive operator guidance for every gated
+	// repository. Guidance specific to one checkout belongs in RepoInstructions.
 	// SECURITY: operator guidance does not change the trusted-default-branch
 	// boundary of repository settings or expose new executable controls. The
 	// existing top-level Agent setting is separate from this narrow surface.
-	Review OperatorReviewRaw `yaml:"review"`
+	Review   OperatorReviewRaw `yaml:"review"`
+	Document DocumentRaw       `yaml:"document"`
 	// RepoInstructions scopes review and document guidance to ONE repository. Keys are
 	// registered checkout paths (Repo.WorkingPath), matched exactly the way
 	// WorktreeRoots keys are, because they answer the same question: which
@@ -240,6 +240,7 @@ type globalConfigRaw struct {
 	ReviewAgents            map[string]ReviewAgent      `yaml:"review_agents"`
 	WorktreeRoots           map[string]string           `yaml:"worktree_roots"`
 	Review                  OperatorReviewRaw           `yaml:"review"`
+	Document                DocumentRaw                 `yaml:"document"`
 	RepoInstructions        map[string]RepoInstructions `yaml:"repo_instructions"`
 	CITimeout               string                      `yaml:"ci_timeout"`
 	DaemonConnectTimeout    string                      `yaml:"daemon_connect_timeout"`
@@ -1383,16 +1384,18 @@ log_level: info
 # fields under repo_instructions apply to one, keyed by the checkout path you
 # ran "no-mistakes init" in, exactly like worktree_roots. Both are additive:
 # they add requirements to a pass and can never weaken one, which is why this
-# surface covers those two fields only - commands, agent, no_ci,
-# allow_repo_commands, and pr.base_branch still come from the repository's own
-# trusted default branch. Every block reaches the agent labelled with the
-# configuration it came from.
+# guidance surface covers those two fields only, not executable commands or
+# gate controls. Existing top-level settings such as agent remain separate.
+# Every block reaches the agent labelled with the configuration it came from.
 # review:
 #   path_instructions:
 #     - path: "**/*.vue"
 #       instructions: |
 #         Repeated instances of a component are driven from a computed,
 #         not stacked v-ifs.
+# document:
+#   instructions: |
+#     Never write a postmortem into AGENTS.md.
 # repo_instructions:
 #   /Users/you/src/my-repo:
 #     review:
@@ -2398,7 +2401,11 @@ func LoadGlobalFromBytes(data []byte) (*GlobalConfig, error) {
 	if err := validateReviewPathInstructions("review.path_instructions", raw.Review.PathInstructions, MaxOperatorReviewPathInstructions, MaxOperatorReviewPathInstructionsBytes); err != nil {
 		return nil, err
 	}
+	if err := validateDocumentRaw("document.instructions", raw.Document); err != nil {
+		return nil, err
+	}
 	cfg.Review = raw.Review
+	cfg.Document = raw.Document
 	if raw.RepoInstructions != nil {
 		if err := ValidateRepoInstructions(raw.RepoInstructions); err != nil {
 			return nil, err
@@ -3324,7 +3331,7 @@ func (c *Config) AutoFixLimit(step types.StepName) int {
 }
 
 // Merge combines global and per-repo config for a caller that has no registered
-// repository in hand. It resolves the operator's global review guidance
+// repository in hand. It resolves the operator's global review/document guidance
 // but not the per-repository half, which needs a checkout path to
 // select an entry; callers that know theirs use MergeForCheckout.
 func Merge(global *GlobalConfig, repo *RepoConfig) *Config {
@@ -3501,6 +3508,7 @@ func merge(global *GlobalConfig, repo *RepoConfig, override *RepositoryOverride,
 		// requirements to a pass here, never remove one (see
 		// GlobalConfig.Review).
 		Document: Document{Instructions: resolveDocumentInstructions(
+			DocumentInstruction{Source: InstructionSourceOperatorGlobal, Text: global.Document.Instructions},
 			DocumentInstruction{Source: InstructionSourceOperatorRepo, Text: scoped.Document.Instructions},
 			DocumentInstruction{Source: InstructionSourceRepository, Text: repo.Document.Instructions},
 		)},

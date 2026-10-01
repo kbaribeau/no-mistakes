@@ -56,9 +56,10 @@ func (c *Config) EnableEvalProvenance(global *GlobalConfig, repo *RepoConfig) er
 		raw = make(map[string]any)
 	}
 	// Never retain unrelated checkout guidance or its machine-specific keys.
-	// The global review block is already in the ordered, source-labelled list.
+	// Global review/document blocks are already in the ordered, source-labelled lists.
 	delete(raw, "repo_instructions")
 	delete(raw, "review")
+	delete(raw, "document")
 	raw[evalGuidanceKey] = guidance
 	globalYAML, err := yaml.Marshal(raw)
 	if err != nil {
@@ -173,7 +174,7 @@ func LoadEvalConfig(globalYAML, repoYAML []byte) (*Config, error) {
 	}
 	cfg.Document.Instructions = nil
 	for _, entry := range snapshot.Document {
-		if entry.Source != InstructionSourceOperatorRepo && entry.Source != InstructionSourceRepository {
+		if entry.Source != InstructionSourceOperatorGlobal && entry.Source != InstructionSourceOperatorRepo && entry.Source != InstructionSourceRepository {
 			return nil, fmt.Errorf("invalid selected document guidance source %q", entry.Source)
 		}
 		if strings.TrimSpace(entry.Text) == "" {
