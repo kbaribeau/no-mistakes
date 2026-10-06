@@ -347,7 +347,7 @@ func TestCaptureStripsEveryHarnessPinFromThePinnedConfig(t *testing.T) {
 	if !strings.Contains(string(neutral), "log_level") {
 		t.Errorf("pinned config lost unrelated settings: %s", neutral)
 	}
-	cfg, err := config.LoadGlobalFromBytes(neutral)
+	cfg, err := config.LoadEvalConfig(neutral, []byte("{}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

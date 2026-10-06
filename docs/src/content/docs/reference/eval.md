@@ -125,6 +125,12 @@ Effort is part of the candidate identity, so `codex,model=gpt-5.4,effort=low` an
 
 The replay restores each case into a fresh temporary bare gate and worktree, then invokes only the existing Review step. Branch-base resolution uses the captured default-branch commit restored as a local remote-tracking ref, without fetching an upstream remote. A case pool therefore needs no configured remote to replay. Push, PR, CI, test, lint, document, and fix loops are outside this subject under test.
 
+Review provenance records the resolved per-repository `review.path_instructions` list before changed-file matching, including an explicit empty selection. Capture retains that internal versioned selection alongside the historical global and trusted repository rules, and removes the redundant per-remote Review lists from exported overrides. Replay restores the three sources in their usual order and validates their combined budget, without consulting today's remote or configuration. An uninterrupted executor retains its inputs; recovery can resolve new inputs for later rounds without changing earlier snapshots.
+
+This preserves **historical configured inputs**, not historical prompt bytes or executable code: the running binary supplies the current Review renderer and behavior. The recorded source build does not select an old binary, so findings can differ when Review itself changes.
+
+Older public rounds and cases without a recorded selection remain usable only when their saved configuration has **no nonempty per-remote Review guidance anywhere**. Empty lists and overrides containing only commands, formatting, or Document guidance are unambiguous. Any nonempty remote Review list makes the historical selection unknown—even a single entry does not prove it matched. Capture/replay then reports that the selection was not recorded and asks for a new review with provenance enabled; recapturing the same old round cannot recover it. Missing configuration files, malformed or unsupported selection metadata, and the earlier private Review+Document snapshot format fail closed. Rejected artifacts are not rewritten or automatically migrated; keep private snapshots separate and recapture or deliberately convert a copy.
+
 Replay scores each candidate finding against that gold:
 
 - **true-positive**: the candidate raises the same underlying issue as a true-issue gold finding (user Fix, auto-fix-merged, human-added miss, a confirmed post-PR miss, or an automatically ingested CI miss)
@@ -150,7 +156,7 @@ The command streams one scored progress line per replay as it completes, then re
 no-mistakes eval report
 ```
 
-The report groups local replays by candidate and cohort. A cohort pins the selected case IDs and repeat count, so frontier comparisons only compare candidates run over the same corpus and repeat plan. It shows:
+The report groups local replays by candidate and cohort. A cohort pins the selected case IDs and repeat count, so frontier comparisons only compare candidates run over the same corpus and repeat plan. It does not pin the replay binary or prompt implementation: keep measurements from different Review builds separate and record the source SHA when comparing them. It shows:
 
 - finding-level true-positive, false-negative, false-positive, and pending counts
 - recall over gold issues, or unlabeled / pending when a case has no finding-level gold

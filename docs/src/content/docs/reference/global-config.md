@@ -1117,7 +1117,7 @@ repository_overrides:
 Both are additive only: the repository's trusted values still apply in full.
 Under `review` only `path_instructions` is accepted, and under `document` only `instructions`; settings that could weaken a gate, such as `no_ci`, `allow_repo_commands`, or `pr.base_branch`, are not accepted here.
 
-Eval replay cases store no remote URL, so a replay does not apply a matching entry's review or documentation guidance.
+Eval provenance records the selected per-repository Review rules, including an empty selection, so replay restores historical guidance without looking up a remote. Older cases with unrecorded, ambiguous per-remote Review guidance require a new review; see [Evaluation toolkit](/no-mistakes/reference/eval/) for compatibility and fidelity limits. Replay uses the current Review implementation, not historical prompt bytes, and does not execute Document.
 
 #### Machine-local commands
 

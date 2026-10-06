@@ -201,8 +201,8 @@ func Capture(ctx context.Context, store *Store, p *paths.Paths, database *db.DB,
 		if err != nil {
 			return nil, fmt.Errorf("read review round %q global configuration: %w", round.ID, err)
 		}
-		if _, err := config.LoadRepoFromBytes(round.RepoConfigYAML); err != nil {
-			return nil, fmt.Errorf("read review round %q repository configuration: %w", round.ID, err)
+		if _, err := config.LoadEvalConfig(globalConfig, round.RepoConfigYAML); err != nil {
+			return nil, fmt.Errorf("read review round %q configuration: %w", round.ID, err)
 		}
 		repoConfigBytes := append([]byte(nil), round.RepoConfigYAML...)
 		replayBaseSHA, err := effectiveReplayBase(ctx, gateDir, run.BaseSHA, reviewedSHA, trustedSHA)
@@ -308,7 +308,8 @@ func repoConfigAt(ctx context.Context, gateDir, sha string) (*config.RepoConfig,
 }
 
 func agentNeutralGlobalConfig(data []byte) ([]byte, error) {
-	if _, err := config.LoadGlobalFromBytes(data); err != nil {
+	data, err := config.PrepareEvalGlobal(data)
+	if err != nil {
 		return nil, fmt.Errorf("read pinned global config for capture: %w", err)
 	}
 	var raw map[string]any
