@@ -263,10 +263,20 @@ Previous review findings to address:
 	// run with none configured - or none relevant to this diff - gets the
 	// prompt above unchanged.
 	pathInstructions := ""
+	operatorGuidanceRendered := false
 	for _, source := range sctx.Config.Review.PathInstructionSources() {
 		matches := matchPathInstructions(changed, source.Entries)
 		logPathInstructions(sctx.Log, source.Label, matches)
-		pathInstructions += reviewPathInstructionsSection(source.Heading, matches)
+		section := reviewPathInstructionsSection(source.Heading, matches)
+		pathInstructions += section
+		if section != "" && (source.Heading == config.ReviewGlobalPathInstructionsHeading || source.Heading == config.ReviewRepositoryPathInstructionsHeading) {
+			operatorGuidanceRendered = true
+		}
+	}
+	if operatorGuidanceRendered {
+		// Fixed discipline, not part of the budgeted configurable sections.
+		// Unmatched operator rules must leave a trusted-only prompt unchanged.
+		pathInstructions += supplementalGuidanceRule
 	}
 
 	// The authorization/privacy obligation below specializes the existing

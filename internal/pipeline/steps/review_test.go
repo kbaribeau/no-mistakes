@@ -1542,7 +1542,8 @@ func TestReviewStep_PathInstructionsLeaveUnconfiguredPromptUnchanged(t *testing.
 
 // Machine-local rules from the operator's global config render as their own
 // labeled sections ahead of the repository's trusted rules, and only append:
-// the prompt is the unconfigured one plus the three sections and nothing else.
+// the prompt is the unconfigured one plus the three sections and the fixed
+// conflict protocol, outside those sections' configurable byte budget.
 func TestReviewStep_OperatorPathInstructionsRenderAsLabeledSectionsBeforeTrusted(t *testing.T) {
 	t.Parallel()
 
@@ -1558,7 +1559,7 @@ func TestReviewStep_OperatorPathInstructionsRenderAsLabeledSectionsBeforeTrusted
 		"\n\n" + config.ReviewGlobalPathInstructionsHeading + "\n" + wantBlock("*.txt", "feature.txt", "Global operator rule.") +
 		"\n\n" + config.ReviewRepositoryPathInstructionsHeading + "\n" + wantBlock("feature.txt", "feature.txt", "Per-repository operator rule.") +
 		wantSection(wantBlock("*.txt", "feature.txt", "Trusted maintainer rule.")) +
-		agent.MemoryFilesRule
+		supplementalGuidanceRule + agent.MemoryFilesRule
 	if got != want {
 		t.Fatalf("review prompt = %q, want the unconfigured prompt plus global, per-repository, then trusted sections", got)
 	}

@@ -201,6 +201,14 @@ func (s *DocumentStep) Execute(sctx *pipeline.StepContext) (*pipeline.StepOutcom
 // the task, and - in combined mode - the lint duty.
 func (s *DocumentStep) buildPrompt(sctx *pipeline.StepContext, baseSHA, ignorePatterns string, combinedLint bool) string {
 	historySection := executionContextPromptSection(sctx.WorkDir) + roundHistoryPromptSection(sctx) + userIntentPromptSection(sctx)
+	policySections := repositoryDocumentPolicySection(sctx) + trustedDocumentPolicySection(sctx)
+	if sctx.Config != nil && sanitizePromptMultilineText(sctx.Config.Document.RepositoryInstructions) != "" {
+		policySections += supplementalGuidanceRule
+		if combinedLint {
+			policySections += `
+- For a documentation-policy conflict, set "category" to "documentation", not "lint".`
+		}
+	}
 
 	intro := "Keep the project documentation accurate for this change."
 	if combinedLint {
@@ -224,7 +232,7 @@ Context:
 
 %s
 
-%s%s%s
+%s%s
 
 Task:
 
@@ -257,8 +265,7 @@ Rules:
 		ignorePatterns,
 		documentPlacementPolicy,
 		documentScopeDiscipline,
-		repositoryDocumentPolicySection(sctx),
-		trustedDocumentPolicySection(sctx),
+		policySections,
 		lintDutySection(combinedLint),
 		editRule,
 		historySection,
